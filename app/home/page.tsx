@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/auth-context';
 import { AppShell } from '../../components/app-shell';
 import { Avatar } from '../../components/rally-nav';
 import { Onboarding } from '../../components/onboarding';
+import { RallyAgent } from '../../components/rally-agent';
 import {
   confirmRecognition,
   declineRecognition,
@@ -128,7 +129,8 @@ export default function HomePage() {
   return (
     <AppShell active="home" rail={rail}>
       <Onboarding />
-      <div className="rl-tm" style={{ marginBottom: 2 }}>Your cohort, lifting each other — here&apos;s what needs you and how you&apos;re doing.</div>
+      <div className="rl-tm" style={{ marginBottom: 2 }}>Your cohort, in sync — here&apos;s what needs you and how you&apos;re doing.</div>
+      <RallyAgent />
       {/* Band 1 — recognition */}
       <div className="rl-band"><span className="rl-bn">1</span> You&apos;re winning <span className="em">— who thanked you</span></div>
       <div className="rl-card">

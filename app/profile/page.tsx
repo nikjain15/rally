@@ -21,7 +21,6 @@ export default function ProfilePage() {
     if (!user) return;
     return subscribeMyProfile(user.uid, (p) => {
       setProfile(p);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraft((d) => (d === '' && p ? p.displayName : d));
     });
   }, [user]);

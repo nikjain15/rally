@@ -323,3 +323,27 @@ describe('commitments — you own your promise, the server owns its completion',
     );
   });
 });
+
+/* ==========================================================================
+ * Rally assistant — a private conversation + memory, server-written only
+ * ========================================================================== */
+describe('assistant — your conversation and memory are yours alone', () => {
+  it('lets you read your own assistant thread and memory', async () => {
+    await seed(env, `assistantThreads/${ALICE}/messages/m1`, { role: 'assistant', content: 'hi', createdAt: 1 });
+    await seed(env, `assistantMemory/${ALICE}`, { notes: ['prefers mornings'] });
+    await assertSucceeds(getDoc(doc(as(env, ALICE), `assistantThreads/${ALICE}/messages/m1`)));
+    await assertSucceeds(getDoc(doc(as(env, ALICE), `assistantMemory/${ALICE}`)));
+  });
+
+  it('denies reading someone else\'s conversation or memory', async () => {
+    await seed(env, `assistantThreads/${ALICE}/messages/m1`, { role: 'assistant', content: 'private', createdAt: 1 });
+    await seed(env, `assistantMemory/${ALICE}`, { notes: ['secret'] });
+    await assertFails(getDoc(doc(as(env, BOB), `assistantThreads/${ALICE}/messages/m1`)));
+    await assertFails(getDoc(doc(as(env, BOB), `assistantMemory/${ALICE}`)));
+  });
+
+  it('denies a client writing a reply or seeding the memory (server-only)', async () => {
+    await assertFails(setDoc(doc(as(env, ALICE), `assistantThreads/${ALICE}/messages/m1`), { role: 'assistant', content: 'forged', createdAt: 1 }));
+    await assertFails(setDoc(doc(as(env, ALICE), `assistantMemory/${ALICE}`), { notes: ['injected'] }));
+  });
+});

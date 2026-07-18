@@ -246,6 +246,18 @@ body {
 .rl-msgrow:hover .rl-msgactions, .rl-msgactions:focus-within { opacity: 1; }
 @media (hover: none) { .rl-msgactions { opacity: 1; } }
 .rl-edited { color: var(--slate-400); }
+/* ---- Rally assistant (Home) ---- */
+.rl-agent { gap: 10px; }
+.rl-agent-memory { background: var(--coral-50); border: 1px solid var(--coral-100); border-radius: 10px; padding: 10px 12px; }
+.rl-agent-thread { display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto; }
+.rl-agent-msg { display: flex; flex-direction: column; gap: 6px; }
+.rl-agent-msg.user { align-items: flex-end; }
+.rl-agent-msg.assistant { align-items: flex-start; }
+.rl-agent-bub { max-width: 86%; padding: 9px 12px; border-radius: 12px; font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; }
+.rl-agent-bub.user { background: var(--coral-500); color: #fff; border-bottom-right-radius: 4px; }
+.rl-agent-bub.assistant { background: var(--slate-100); color: var(--ink); border-bottom-left-radius: 4px; }
+.rl-agent-prop { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--paper); border: 1px solid var(--line-strong); border-radius: 10px; padding: 9px 11px; max-width: 100%; }
+
 /* ---- public landing (root URL, signed-out) ---- */
 .rl-land { max-width: 920px; margin: 0 auto; padding: 20px 24px 56px; display: flex; flex-direction: column; gap: 44px; }
 .rl-land-nav { display: flex; align-items: center; justify-content: space-between; }

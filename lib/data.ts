@@ -592,3 +592,55 @@ export async function askRally(channelId: string, question: string): Promise<Ask
     return { available: false, answer: null };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Rally assistant (Home). Conversation + memory are server-written and private to the user;
+// the client subscribes to render them and POSTs new messages to the tool-use route.
+// ---------------------------------------------------------------------------
+
+export type AssistantProposal =
+  | { kind: 'commitment'; text: string }
+  | { kind: 'message'; channel: string; body: string }
+  | { kind: 'recognition'; teammate: string; note: string };
+
+export type AssistantMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  proposals: AssistantProposal[];
+  createdAtMs: number;
+};
+
+/** Live view of the user's own assistant conversation (server-written, self-readable). */
+export function subscribeAssistantThread(uid: string, cb: (msgs: AssistantMessage[]) => void): () => void {
+  const q = query(collection(db, 'assistantThreads', uid, 'messages'), orderBy('createdAt', 'asc'), limit(60));
+  return onSnapshot(q, (snap) =>
+    cb(
+      snap.docs.map((d) => ({
+        id: d.id,
+        role: d.data().role as 'user' | 'assistant',
+        content: (d.data().content as string) ?? '',
+        proposals: (d.data().proposals as AssistantProposal[]) ?? [],
+        createdAtMs: (d.data().createdAt as number) ?? 0,
+      })),
+    ),
+  );
+}
+
+/** Live view of what Rally has remembered about the user. */
+export function subscribeAssistantMemory(uid: string, cb: (notes: string[]) => void): () => void {
+  return onSnapshot(doc(db, 'assistantMemory', uid), (snap) => cb(snap.exists() ? ((snap.data().notes as string[]) ?? []) : []));
+}
+
+/** Send a message to the Rally assistant. Returns its reply + any proposals to confirm. */
+export async function askAssistant(
+  message: string,
+): Promise<{ available: boolean; reply: string | null; proposals: AssistantProposal[] }> {
+  try {
+    const res = await authedPost('/api/assistant', { message });
+    if (!res.ok) return { available: false, reply: null, proposals: [] };
+    return (await res.json()) as { available: boolean; reply: string | null; proposals: AssistantProposal[] };
+  } catch {
+    return { available: false, reply: null, proposals: [] };
+  }
+}

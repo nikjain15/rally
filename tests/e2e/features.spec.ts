@@ -228,6 +228,18 @@ test('first-time onboarding shows once, then stays dismissed', async ({ page }) 
   await expect(page.getByRole('dialog', { name: 'Welcome to Rally' })).toHaveCount(0, { timeout: 10_000 });
 });
 
+test('the Rally assistant panel renders on Home', async ({ page }) => {
+  await page.goto('/channels');
+  await signInWithGithubEmulator(page);
+  await waitForChannels(page);
+  await page.getByRole('link', { name: 'Home' }).click();
+
+  // The assistant mounts with its input and starter prompts (no message sent — avoids a live call).
+  await expect(page.getByText('Rally · your assistant')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByLabel('Ask Rally', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Catch me up' })).toBeVisible();
+});
+
 test('the Home situation board renders its bands', async ({ page }) => {
   await page.goto('/channels');
   await signInWithGithubEmulator(page);
@@ -240,5 +252,5 @@ test('the Home situation board renders its bands', async ({ page }) => {
   await expect(page.locator('.rl-band', { hasText: "You're winning" })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('.rl-band', { hasText: 'Caught up' })).toBeVisible();
   await expect(page.locator('.rl-band', { hasText: 'Building together' })).toBeVisible();
-  await expect(page.getByText('Catch me up')).toBeVisible();
+  await expect(page.locator('.rl-k', { hasText: 'Catch me up' })).toBeVisible();
 });
