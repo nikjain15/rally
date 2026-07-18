@@ -230,5 +230,23 @@ service cloud.firestore {
       allow read: if signedIn();
       allow write: if false;
     }
+
+    // --- Rally assistant (Home) ----------------------------------------------
+    // The assistant's conversation + memory are PRIVATE to the one user and written ONLY by the
+    // server route (Admin bypasses these rules). The client may read its own thread/memory to
+    // render them, but can never write — so nobody can forge a reply, seed the model's memory, or
+    // read anyone else's conversation. Doc id is the uid.
+    match /assistantThreads/{uid} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+      match /messages/{mid} {
+        allow read: if isSelf(uid);
+        allow write: if false;
+      }
+    }
+    match /assistantMemory/{uid} {
+      allow read: if isSelf(uid);
+      allow write: if false;
+    }
   }
 }
