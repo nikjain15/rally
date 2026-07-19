@@ -51,6 +51,24 @@ export async function readSharedActivity(db: Firestore, handle: string, limit = 
   return snap.docs.reverse().map((d) => d.data() as SharedActivity);
 }
 
+/**
+ * Erase everything the shared bus holds about a person — memory notes AND activity history.
+ * The user's right to be forgotten. Returns how many docs were removed. Server-only (Admin).
+ */
+export async function forgetShared(db: Firestore, handle: string): Promise<number> {
+  if (!isValidHandle(handle)) return 0;
+  let removed = 0;
+  for (const path of [BUS.memory(handle), BUS.activity(handle)]) {
+    const snap = await db.collection(path).get();
+    for (const d of snap.docs) {
+      await d.ref.delete();
+      removed += 1;
+    }
+  }
+  await db.doc(BUS.context(handle)).delete().catch(() => {});
+  return removed;
+}
+
 /** One app's agent asks another app's agent to do work. Returns the new task id. */
 export async function dispatchTask(
   db: Firestore,

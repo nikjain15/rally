@@ -666,3 +666,34 @@ export async function checkAssistantInbox(): Promise<number> {
     return 0;
   }
 }
+
+export type SharedContext = {
+  handle: string | null;
+  memory: { app: string; text: string; createdAt: number }[];
+  activity: { app: string; kind: string; summary: string; createdAt: number }[];
+};
+
+/** Your shared memory + interaction history across all cohort apps (read back by the server). */
+export async function fetchSharedContext(): Promise<SharedContext> {
+  try {
+    const res = await authedGet('/api/assistant/memory');
+    if (!res.ok) return { handle: null, memory: [], activity: [] };
+    return (await res.json()) as SharedContext;
+  } catch {
+    return { handle: null, memory: [], activity: [] };
+  }
+}
+
+/** Right to be forgotten: erase all your shared record + local assistant data. Returns success. */
+export async function forgetMyHistory(): Promise<boolean> {
+  try {
+    const token = await auth.currentUser?.getIdToken();
+    const res = await fetch('/api/assistant/memory', {
+      method: 'DELETE',
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
