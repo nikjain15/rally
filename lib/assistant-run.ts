@@ -1,8 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Firestore } from 'firebase-admin/firestore';
 import { MODELS } from './agent';
+import { busDb } from './admin';
 import { ASSISTANT_TOOLS, isProposeTool, isSafeTool, toProposal, type Proposal } from './assistant';
-import { loadMemory, loadThread, runSafeTool, saveTurn } from './assistant-admin';
+import { getHandle, loadMemory, loadThread, runSafeTool, saveTurn } from './assistant-admin';
+import { readSharedMemory } from './shared-context';
 
 /**
  * The bounded Claude tool-use loop for the Home assistant. Lives in lib (not the route) so the
@@ -39,7 +41,10 @@ export async function runAssistant(
   message: string,
   nowMs: number,
 ): Promise<AssistantResult> {
-  const [history, memory] = await Promise.all([loadThread(db, uid), loadMemory(db, uid)]);
+  const [history, localMemory, handle] = await Promise.all([loadThread(db, uid), loadMemory(db, uid), getHandle(db, uid)]);
+  // Merge app-local memory with the shared cross-app memory so the assistant carries one history.
+  const shared = handle ? await readSharedMemory(busDb() ?? db, handle) : [];
+  const memory = [...localMemory, ...shared.map((n) => `[${n.app}] ${n.text}`)];
   const messages: Anthropic.MessageParam[] = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: 'user', content: message },
@@ -73,7 +78,7 @@ export async function runAssistant(
       for (const tu of toolUses) {
         const input = (tu.input ?? {}) as Record<string, unknown>;
         if (isSafeTool(tu.name)) {
-          const out = await runSafeTool(db, uid, tu.name, input, nowMs);
+          const out = await runSafeTool(db, uid, tu.name, input, nowMs, handle);
           toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: out });
         } else if (isProposeTool(tu.name)) {
           const p = toProposal(tu.name, input);

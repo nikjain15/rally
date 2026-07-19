@@ -12,6 +12,7 @@
     "./cohort": { "types": "./dist/cohort.d.ts", "default": "./dist/cohort.js" },
     "./rate-limit": { "types": "./dist/rate-limit.d.ts", "default": "./dist/rate-limit.js" },
     "./github-repo": { "types": "./dist/github-repo.d.ts", "default": "./dist/github-repo.js" },
+    "./shared-context": { "types": "./dist/shared-context.d.ts", "default": "./dist/shared-context.js" },
     "./types": { "types": "./dist/types.d.ts", "default": "./dist/types.js" }
   },
   "files": ["dist", "src"],

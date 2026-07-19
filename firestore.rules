@@ -248,5 +248,21 @@ service cloud.firestore {
       allow read: if isSelf(uid);
       allow write: if false;
     }
+
+    // --- shared cross-app context bus (server-only) --------------------------
+    // The cohort suite's shared brain: memory, activity history, and agent-to-agent tasks, keyed
+    // by GitHub handle. Written ONLY by trusted app servers (Admin bypasses these rules); no client
+    // ever reads or writes it directly, so one user can't read another's cross-app context or forge
+    // a task for someone else's agent. In production this lives in a dedicated shared project with
+    // the same deny-all-clients rules.
+    match /cohortContext/{key} {
+      allow read, write: if false;
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+    match /agentTasks/{id} {
+      allow read, write: if false;
+    }
   }
 }

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../lib/auth-context';
 import {
   askAssistant,
+  checkAssistantInbox,
+  dispatchToApp,
   runDetection,
   sendMessage,
   subscribeAssistantMemory,
@@ -47,6 +49,10 @@ export function RallyAgent() {
 
   useEffect(() => { bottom.current?.scrollIntoView({ block: 'end' }); }, [thread.length, busy]);
 
+  // On open, pull any cross-app requests other apps' agents addressed to Rally and run them; their
+  // results land in this conversation via the thread subscription.
+  useEffect(() => { if (user) void checkAssistantInbox(); }, [user]);
+
   if (!user) return null;
 
   async function send(text: string) {
@@ -78,6 +84,8 @@ export function RallyAgent() {
       } else if (p.kind === 'recognition') {
         const cid = channelId('general');
         if (cid) { const body = `Thanks ${p.teammate} — ${p.note}`; const id = await sendMessage(cid, user!.uid, body); void runDetection(`channels/${cid}/messages/${id}`, body); }
+      } else if (p.kind === 'dispatch') {
+        await dispatchToApp(p.app, p.intent);
       }
     } catch {
       // Leave it marked handled — the reply already explained what was drafted; no retry loop.
@@ -158,11 +166,13 @@ export function RallyAgent() {
 function proposalLabel(p: AssistantProposal): string {
   if (p.kind === 'commitment') return `Track a commitment: “${p.text}”`;
   if (p.kind === 'message') return `Post to #${p.channel}: “${p.body}”`;
-  return `Thank ${p.teammate}: “${p.note}”`;
+  if (p.kind === 'recognition') return `Thank ${p.teammate}: “${p.note}”`;
+  return `Ask ${p.app} to: “${p.intent}”`;
 }
 
 function confirmLabel(p: AssistantProposal): string {
   if (p.kind === 'commitment') return 'Track it';
   if (p.kind === 'message') return 'Post it';
-  return 'Post thank-you';
+  if (p.kind === 'recognition') return 'Post thank-you';
+  return `Send to ${p.app}`;
 }

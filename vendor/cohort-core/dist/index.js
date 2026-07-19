@@ -9,3 +9,4 @@ export * from './types';
 export * from './cohort';
 export * from './rate-limit';
 export * from './github-repo';
+export * from './shared-context';

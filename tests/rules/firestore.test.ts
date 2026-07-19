@@ -347,3 +347,22 @@ describe('assistant — your conversation and memory are yours alone', () => {
     await assertFails(setDoc(doc(as(env, ALICE), `assistantMemory/${ALICE}`), { notes: ['injected'] }));
   });
 });
+
+/* ==========================================================================
+ * shared cross-app context bus — server-only, never client-touchable
+ * ========================================================================== */
+describe('shared context bus — no client can read or write it', () => {
+  it('denies client reads/writes of another\'s cross-app context and memory', async () => {
+    await seed(env, 'cohortContext/nikjain15', { handle: 'nikjain15' });
+    await seed(env, 'cohortContext/nikjain15/memory/n1', { app: 'rally', text: 'private', createdAt: 1 });
+    await assertFails(getDoc(doc(as(env, ALICE), 'cohortContext/nikjain15')));
+    await assertFails(getDoc(doc(as(env, ALICE), 'cohortContext/nikjain15/memory/n1')));
+    await assertFails(setDoc(doc(as(env, ALICE), 'cohortContext/nikjain15/memory/x'), { app: 'x', text: 'forged', createdAt: 1 }));
+  });
+
+  it('denies client reads/writes of agent tasks (no forging cross-app work)', async () => {
+    await seed(env, 'agentTasks/t1', { fromApp: 'pulse', toApp: 'rally', handle: 'nikjain15', status: 'pending' });
+    await assertFails(getDoc(doc(as(env, ALICE), 'agentTasks/t1')));
+    await assertFails(setDoc(doc(as(env, ALICE), 'agentTasks/t2'), { fromApp: 'x', toApp: 'rally', handle: 'nikjain15', status: 'pending' }));
+  });
+});
