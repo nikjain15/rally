@@ -14,6 +14,13 @@ import { rememberShared } from './shared-context';
 export type ThreadMessage = { role: 'user' | 'assistant'; content: string };
 
 /** Run one SAFE tool and return a compact text result to feed back into the model. */
+/** Erase the caller's app-local assistant data (conversation + memory). Pairs with forgetShared. */
+export async function forgetLocal(db: Firestore, uid: string): Promise<void> {
+  const msgs = await db.collection('assistantThreads').doc(uid).collection('messages').get();
+  for (const d of msgs.docs) await d.ref.delete();
+  await db.collection('assistantMemory').doc(uid).delete().catch(() => {});
+}
+
 /** The caller's GitHub handle — the cross-app key. Null if we never learned it (no shared layer). */
 export async function getHandle(db: Firestore, uid: string): Promise<string | null> {
   const snap = await db.collection('profiles').doc(uid).get();

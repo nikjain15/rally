@@ -74,6 +74,25 @@ context already works *within* an app. To make it truly shared across apps:
 4. On **every** app's host (Vercel), set `SHARED_FIREBASE_SERVICE_ACCOUNT` to that JSON.
 5. Redeploy. Every app now reads/writes the same bus; the fallback is no longer used.
 
+## Privacy model
+
+The bus records a person's memory and full interaction history across apps, so privacy is designed
+in, not bolted on:
+
+- **Per-person isolation.** Everything is keyed by `contextKey(handle)`; there is no query that
+  returns another person's data. One user can never read or write another's context.
+- **Server-only.** The bus has deny-all-client rules — no browser ever touches it. Only trusted app
+  servers (Admin SDK), after verifying the caller's ID token, read or write it. Provenance (`app`)
+  is stored on every note and event so it's always clear which app wrote what.
+- **Data minimization.** The shared history stores *concise summaries* (the request + what was
+  drafted), never full model output or raw transcripts. Full detail stays app-local (Rally's
+  `assistantThreads`, self-read only).
+- **User access + erasure.** `GET /api/assistant/memory` reads the user their own shared memory +
+  history; `DELETE` is the right to be forgotten — it purges their entire shared record *and* their
+  app-local assistant data. Exposed in the assistant's "Memory & privacy" panel.
+- **Consent to share.** A note only reaches the bus when the user has a GitHub handle (the shared
+  key); without one, memory stays app-local. Explicit `remember`/actions are what get recorded.
+
 ## Current state
 
 - **Rally**: fully implemented — shared memory read/write, activity, dispatch, and inbox. The bus

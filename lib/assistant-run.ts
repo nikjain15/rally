@@ -4,7 +4,7 @@ import { MODELS } from './agent';
 import { busDb } from './admin';
 import { ASSISTANT_TOOLS, isProposeTool, isSafeTool, toProposal, type Proposal } from './assistant';
 import { getHandle, loadMemory, loadThread, runSafeTool, saveTurn } from './assistant-admin';
-import { readSharedMemory } from './shared-context';
+import { logSharedActivity, readSharedMemory } from './shared-context';
 
 /**
  * The bounded Claude tool-use loop for the Home assistant. Lives in lib (not the route) so the
@@ -100,5 +100,18 @@ export async function runAssistant(
 
   if (!finalText) finalText = proposals.length ? "Here's what I drafted — confirm below to go ahead." : 'Done.';
   await saveTurn(db, uid, message, finalText, proposals, nowMs);
+
+  // Record the interaction on the shared bus so the user's cross-app history is complete. We log a
+  // concise summary (the request + what was drafted), never the full model output — data
+  // minimization. Best-effort: a bus hiccup must never fail the turn.
+  if (handle) {
+    const drafted = proposals.length ? ` · drafted ${proposals.map((p) => p.kind).join(', ')}` : '';
+    const summary = `asked: "${message.slice(0, 120)}"${drafted}`;
+    try {
+      await logSharedActivity(busDb() ?? db, handle, 'assistant', summary, nowMs);
+    } catch {
+      /* history is best-effort */
+    }
+  }
   return { available: true, reply: finalText, proposals };
 }

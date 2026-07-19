@@ -9,6 +9,7 @@ import {
   claimTasks,
   completeTask,
   dispatchTask,
+  forgetShared,
   logSharedActivity,
   readSharedActivity,
   readSharedMemory,
@@ -46,6 +47,19 @@ describe('shared memory + activity — keyed by GitHub handle, readable by any a
     await logSharedActivity(db, 'nikjain15', 'recognition', 'thanked a teammate', 1);
     const acts = await readSharedActivity(db, 'nikjain15');
     expect(acts[0]).toMatchObject({ app: 'rally', kind: 'recognition', summary: 'thanked a teammate' });
+  });
+
+  it('forgetShared erases a person\'s memory + history (right to be forgotten), only theirs', async () => {
+    await rememberShared(db, 'nikjain15', 'a note', 1);
+    await logSharedActivity(db, 'nikjain15', 'assistant', 'asked something', 2);
+    await rememberShared(db, 'someoneelse', 'their note', 3);
+
+    const removed = await forgetShared(db, 'nikjain15');
+    expect(removed).toBeGreaterThanOrEqual(2);
+    expect(await readSharedMemory(db, 'nikjain15')).toEqual([]);
+    expect(await readSharedActivity(db, 'nikjain15')).toEqual([]);
+    // Another person's record is untouched.
+    expect((await readSharedMemory(db, 'someoneelse')).map((n) => n.text)).toEqual(['their note']);
   });
 });
 

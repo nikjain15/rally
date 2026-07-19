@@ -6,6 +6,8 @@ import {
   askAssistant,
   checkAssistantInbox,
   dispatchToApp,
+  fetchSharedContext,
+  forgetMyHistory,
   runDetection,
   sendMessage,
   subscribeAssistantMemory,
@@ -15,6 +17,7 @@ import {
   type AssistantMessage,
   type AssistantProposal,
   type ChannelView,
+  type SharedContext,
 } from '../lib/data';
 
 /**
@@ -34,6 +37,7 @@ export function RallyAgent() {
   const [busy, setBusy] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
+  const [shared, setShared] = useState<SharedContext | null>(null);
   const [handled, setHandled] = useState<Record<string, 'done' | 'dismissed'>>({});
   const bottom = useRef<HTMLDivElement>(null);
 
@@ -52,6 +56,15 @@ export function RallyAgent() {
   // On open, pull any cross-app requests other apps' agents addressed to Rally and run them; their
   // results land in this conversation via the thread subscription.
   useEffect(() => { if (user) void checkAssistantInbox(); }, [user]);
+
+  // Load the shared cross-app record when the user opens the memory view.
+  useEffect(() => { if (showMemory) void fetchSharedContext().then(setShared); }, [showMemory]);
+
+  async function forgetAll() {
+    if (!window.confirm('Forget everything Rally has stored — your shared memory, history, and this conversation? This cannot be undone.')) return;
+    await forgetMyHistory();
+    setShared({ handle: shared?.handle ?? null, memory: [], activity: [] });
+  }
 
   if (!user) return null;
 
@@ -96,17 +109,31 @@ export function RallyAgent() {
     <div className="rl-card rl-agent">
       <div className="rl-row">
         <span className="rl-k indigo rl-grow"><span className="d" />Rally · your assistant</span>
-        {memory.length > 0 && (
-          <button className="rl-btn ghost sm" onClick={() => setShowMemory((s) => !s)} aria-pressed={showMemory}>
-            {showMemory ? 'Hide memory' : `Memory · ${memory.length}`}
-          </button>
-        )}
+        <button className="rl-btn ghost sm" onClick={() => setShowMemory((s) => !s)} aria-pressed={showMemory}>
+          {showMemory ? 'Hide memory' : 'Memory & privacy'}
+        </button>
       </div>
 
       {showMemory && (
         <div className="rl-agent-memory">
-          <div className="rl-tm" style={{ marginBottom: 4 }}>What Rally remembers about you:</div>
-          {memory.map((n, i) => (<div key={i} className="rl-tb">• {n}</div>))}
+          <div className="rl-tm" style={{ marginBottom: 4 }}>What Rally remembers about you{shared?.handle ? ' — shared across your cohort apps' : ''}:</div>
+          {(shared?.memory.length ?? 0) === 0 && memory.length === 0 && <div className="rl-tb">Nothing stored yet.</div>}
+          {shared?.memory.map((n, i) => (<div key={`s${i}`} className="rl-tb">• {n.text} <span className="rl-tm">({n.app})</span></div>))}
+          {(shared?.memory.length ?? 0) === 0 && memory.map((n, i) => (<div key={`l${i}`} className="rl-tb">• {n}</div>))}
+
+          {(shared?.activity.length ?? 0) > 0 && (
+            <>
+              <div className="rl-tm" style={{ margin: '8px 0 4px' }}>Recent history across your apps:</div>
+              {shared!.activity.slice(-8).reverse().map((a, i) => (
+                <div key={`a${i}`} className="rl-tm">· [{a.app}] {a.summary}</div>
+              ))}
+            </>
+          )}
+
+          <div className="rl-btnrow" style={{ marginTop: 8 }}>
+            <button className="rl-btn ghost sm" onClick={forgetAll}>Forget everything</button>
+          </div>
+          <div className="rl-tm" style={{ marginTop: 4 }}>Private to you. Only your own apps read this; no one else can see it.</div>
         </div>
       )}
 
