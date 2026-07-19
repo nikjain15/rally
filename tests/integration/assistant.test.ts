@@ -31,8 +31,8 @@ describe('assistant memory + thread', () => {
   });
 
   it('remember writes to the caller\'s own private memory and accumulates', async () => {
-    expect(await runSafeTool(db, 'u1', 'remember', { note: 'prefers mornings' }, 1)).toContain('Saved');
-    await runSafeTool(db, 'u1', 'remember', { note: 'working on the API' }, 2);
+    expect(await runSafeTool(db, 'u1', 'remember', { note: 'prefers mornings' }, 1, null)).toContain('Saved');
+    await runSafeTool(db, 'u1', 'remember', { note: 'working on the API' }, 2, null);
     expect(await loadMemory(db, 'u1')).toEqual(['prefers mornings', 'working on the API']);
     // Another user's memory is untouched — memory is per-user.
     expect(await loadMemory(db, 'u2')).toEqual([]);
@@ -42,7 +42,7 @@ describe('assistant memory + thread', () => {
     await db.collection('commitments').add({ authorUid: 'u1', text: 'open one', status: 'open', dueAt: null, createdAt: FieldValue.serverTimestamp() });
     await db.collection('commitments').add({ authorUid: 'u1', text: 'done one', status: 'done', dueAt: null, createdAt: FieldValue.serverTimestamp() });
     await db.collection('commitments').add({ authorUid: 'u2', text: 'someone else', status: 'open', dueAt: null, createdAt: FieldValue.serverTimestamp() });
-    const out = await runSafeTool(db, 'u1', 'my_commitments', {}, 1);
+    const out = await runSafeTool(db, 'u1', 'my_commitments', {}, 1, null);
     expect(out).toContain('open one');
     expect(out).not.toContain('done one');
     expect(out).not.toContain('someone else');
@@ -51,14 +51,14 @@ describe('assistant memory + thread', () => {
   it('find_teammate matches by name/handle and excludes the caller', async () => {
     await db.collection('profiles').doc('u1').set({ uid: 'u1', displayName: 'Me', githubLogin: 'me' });
     await db.collection('profiles').doc('u2').set({ uid: 'u2', displayName: 'Linus Torvalds', githubLogin: 'ltorvalds' });
-    const out = await runSafeTool(db, 'u1', 'find_teammate', { query: 'torv' }, 1);
+    const out = await runSafeTool(db, 'u1', 'find_teammate', { query: 'torv' }, 1, null);
     expect(out).toContain('Linus Torvalds');
     expect(out).not.toContain('Me');
   });
 
   it('summarize_channel refuses a channel the caller is not in', async () => {
     await db.collection('channels').doc('secret').set({ name: 'secret', memberUids: ['u2'], kind: 'channel' });
-    const out = await runSafeTool(db, 'u1', 'summarize_channel', { channel: 'secret' }, 1);
+    const out = await runSafeTool(db, 'u1', 'summarize_channel', { channel: 'secret' }, 1, null);
     expect(out.toLowerCase()).toContain("you're not in");
   });
 });

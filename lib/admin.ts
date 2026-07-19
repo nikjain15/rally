@@ -25,6 +25,28 @@ export function adminAuth(): Auth | null {
   return app ? getAuth() : null;
 }
 
+/**
+ * The shared cross-app "context bus" (see @cohort/core/shared-context). In production this is a
+ * dedicated Firebase project all the cohort's apps write to, selected by SHARED_FIREBASE_SERVICE_
+ * ACCOUNT. Until that project exists, the bus transparently falls back to this app's own database
+ * so shared context works within Rally today and flips to the real bus the moment the key is set —
+ * the same degrade-don't-crash rule as everything else. Null only if no credential exists at all.
+ */
+export function busDb(): Firestore | null {
+  const svc = process.env.SHARED_FIREBASE_SERVICE_ACCOUNT;
+  if (svc) {
+    try {
+      const existing = getApps().find((a) => a.name === 'bus');
+      const app = existing ?? initializeApp({ credential: cert(JSON.parse(svc) as Parameters<typeof cert>[0]) }, 'bus');
+      return getFirestore(app);
+    } catch {
+      // A malformed shared key must not take the assistant down — fall back to the primary db.
+      return adminDb();
+    }
+  }
+  return adminDb();
+}
+
 function ensureAdminApp(): boolean {
   if (getApps().length > 0) return true;
   const svc = process.env.FIREBASE_SERVICE_ACCOUNT;

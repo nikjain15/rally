@@ -17,7 +17,8 @@ export type ToolName =
   | 'remember'
   | 'propose_commitment'
   | 'propose_message'
-  | 'propose_recognition';
+  | 'propose_recognition'
+  | 'propose_dispatch';
 
 /** Tools the server runs directly and feeds back into the loop — all read-only or personal. */
 export const SAFE_TOOLS: ReadonlySet<ToolName> = new Set([
@@ -33,6 +34,7 @@ export const PROPOSE_TOOLS: ReadonlySet<ToolName> = new Set([
   'propose_commitment',
   'propose_message',
   'propose_recognition',
+  'propose_dispatch',
 ]);
 
 export function isSafeTool(name: string): name is ToolName {
@@ -46,7 +48,8 @@ export function isProposeTool(name: string): name is ToolName {
 export type Proposal =
   | { kind: 'commitment'; text: string }
   | { kind: 'message'; channel: string; body: string }
-  | { kind: 'recognition'; teammate: string; note: string };
+  | { kind: 'recognition'; teammate: string; note: string }
+  | { kind: 'dispatch'; app: string; intent: string };
 
 /** The Anthropic tool schema. Kept here (not in the route) so it's covered by unit tests. */
 export const ASSISTANT_TOOLS = [
@@ -123,6 +126,18 @@ export const ASSISTANT_TOOLS = [
       required: ['teammate', 'note'],
     },
   },
+  {
+    name: 'propose_dispatch',
+    description: "Hand a task to ANOTHER app's agent in the cohort suite (e.g. ask Pulse's agent to summarize the user's week). Use when the user asks for something another app owns. The user confirms before it is sent.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        app: { type: 'string', description: 'The target app, e.g. "pulse".' },
+        intent: { type: 'string', description: 'What you want that app\'s agent to do, in a short phrase.' },
+      },
+      required: ['app', 'intent'],
+    },
+  },
 ] as const;
 
 /** Convert a validated propose-tool call into a typed Proposal (or null if malformed). */
@@ -135,6 +150,9 @@ export function toProposal(name: string, input: Record<string, unknown>): Propos
   }
   if (name === 'propose_recognition' && typeof input.teammate === 'string' && typeof input.note === 'string') {
     return { kind: 'recognition', teammate: input.teammate.trim(), note: input.note.trim() };
+  }
+  if (name === 'propose_dispatch' && typeof input.app === 'string' && input.app.trim() && typeof input.intent === 'string' && input.intent.trim()) {
+    return { kind: 'dispatch', app: input.app.trim().toLowerCase(), intent: input.intent.trim() };
   }
   return null;
 }

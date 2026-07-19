@@ -1,6 +1,8 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue } from 'firebase-admin/firestore';
 import { gatherBrief } from './brief-admin';
+import { busDb } from './admin';
+import { rememberShared } from './shared-context';
 
 /**
  * Server-side execution for the assistant's SAFE tools (read-only, or the user's own private
@@ -12,12 +14,19 @@ import { gatherBrief } from './brief-admin';
 export type ThreadMessage = { role: 'user' | 'assistant'; content: string };
 
 /** Run one SAFE tool and return a compact text result to feed back into the model. */
+/** The caller's GitHub handle — the cross-app key. Null if we never learned it (no shared layer). */
+export async function getHandle(db: Firestore, uid: string): Promise<string | null> {
+  const snap = await db.collection('profiles').doc(uid).get();
+  return snap.exists ? ((snap.data()?.githubLogin as string | null) ?? (snap.data()?.handle as string | null) ?? null) : null;
+}
+
 export async function runSafeTool(
   db: Firestore,
   uid: string,
   name: string,
   input: Record<string, unknown>,
   nowMs: number,
+  handle: string | null,
 ): Promise<string> {
   if (name === 'catch_me_up') {
     const brief = await gatherBrief(db, uid, nowMs);
@@ -69,11 +78,18 @@ export async function runSafeTool(
   if (name === 'remember') {
     const note = String(input.note ?? '').trim().slice(0, 280);
     if (!note) return 'Nothing to remember.';
+    // Local (uid-scoped) memory always works. When we know the handle, ALSO write to the shared
+    // cross-app bus so the user's other apps' agents see it too — one shared brain.
     await db.collection('assistantMemory').doc(uid).set(
       { notes: FieldValue.arrayUnion(note), updatedAt: FieldValue.serverTimestamp() },
       { merge: true },
     );
-    return `Saved to memory: "${note}"`;
+    let shared = false;
+    if (handle) {
+      const bus = busDb();
+      if (bus) shared = await rememberShared(bus, handle, note, nowMs);
+    }
+    return `Saved to memory${shared ? ' (shared across your apps)' : ''}: "${note}"`;
   }
 
   return `Unknown tool: ${name}`;

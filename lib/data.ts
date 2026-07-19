@@ -601,7 +601,8 @@ export async function askRally(channelId: string, question: string): Promise<Ask
 export type AssistantProposal =
   | { kind: 'commitment'; text: string }
   | { kind: 'message'; channel: string; body: string }
-  | { kind: 'recognition'; teammate: string; note: string };
+  | { kind: 'recognition'; teammate: string; note: string }
+  | { kind: 'dispatch'; app: string; intent: string };
 
 export type AssistantMessage = {
   id: string;
@@ -642,5 +643,26 @@ export async function askAssistant(
     return (await res.json()) as { available: boolean; reply: string | null; proposals: AssistantProposal[] };
   } catch {
     return { available: false, reply: null, proposals: [] };
+  }
+}
+
+/** Hand a task to another app's agent in the cohort suite (cross-app dispatch). */
+export async function dispatchToApp(toApp: string, intent: string): Promise<boolean> {
+  try {
+    const res = await authedPost('/api/assistant/dispatch', { toApp, intent });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Pull any cross-app requests other apps addressed to Rally and run them. Returns how many ran. */
+export async function checkAssistantInbox(): Promise<number> {
+  try {
+    const res = await authedPost('/api/assistant/inbox');
+    if (!res.ok) return 0;
+    return ((await res.json()) as { handled: number }).handled ?? 0;
+  } catch {
+    return 0;
   }
 }

@@ -10,7 +10,7 @@ describe('assistant tool classification — safe vs propose', () => {
   });
 
   it('anything that writes points / posts / credits a peer is a PROPOSE tool', () => {
-    for (const t of ['propose_commitment', 'propose_message', 'propose_recognition']) {
+    for (const t of ['propose_commitment', 'propose_message', 'propose_recognition', 'propose_dispatch']) {
       expect(isProposeTool(t)).toBe(true);
       expect(isSafeTool(t)).toBe(false);
     }
@@ -39,6 +39,10 @@ describe('toProposal — typed drafts for confirmation', () => {
 
   it('builds a recognition proposal', () => {
     expect(toProposal('propose_recognition', { teammate: 'Lin', note: 'unblocked my build' })).toEqual({ kind: 'recognition', teammate: 'Lin', note: 'unblocked my build' });
+  });
+
+  it('builds a cross-app dispatch proposal (app lowercased)', () => {
+    expect(toProposal('propose_dispatch', { app: 'Pulse', intent: 'summarize my week' })).toEqual({ kind: 'dispatch', app: 'pulse', intent: 'summarize my week' });
   });
 
   it('rejects malformed input (missing/empty fields)', () => {
