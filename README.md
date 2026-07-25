@@ -117,6 +117,17 @@ tests/          unit · rules · integration · e2e
 `NEXT_PUBLIC_FIREBASE_*`, `FIREBASE_SERVICE_ACCOUNT`, `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`,
 `GITHUB_PM_REPO`, `GITHUB_WEBHOOK_SECRET`. All optional — the app runs deterministically without them.
 
+## Docs
+
+Deeper product and engineering write-ups live in [`docs/`](docs/):
+
+- [PRD.md](docs/PRD.md) - personas, jobs-to-be-done, success metrics, tradeoffs, and the Now/Next/Later roadmap.
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - system overview with diagrams, including the peer-confirmed trust-ledger data flow, grounded in code paths.
+- [EVALS.md](docs/EVALS.md) - the eval strategy (unit -> rules/anti-gaming -> e2e -> LLM-judge/A-B), named metrics, and what's implemented vs. roadmap.
+- [TECHNICAL_NOTES.md](docs/TECHNICAL_NOTES.md) - the 12-point technical scorecard with file-level evidence, model/orchestration details, guardrails, and cost notes.
+- [FDE_JOURNEY.md](docs/FDE_JOURNEY.md) - how Rally deploys into a live environment: integrations, secrets, rollout/cutover, observability, de-risking.
+- [SHARED-CONTEXT.md](docs/SHARED-CONTEXT.md) - the cross-app context bus and agent-to-agent dispatch contract.
+
 ## License
 
 [MIT](LICENSE).
