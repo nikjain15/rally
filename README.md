@@ -1,3 +1,12 @@
+<p align="center">
+  <a href="https://rally-nikjain15.vercel.app"><img src="assets/hero.png" alt="Rally" width="820"></a>
+</p>
+
+<p align="center"><b>Rally — your cohort, in sync.</b><br>
+  <a href="https://rally-nikjain15.vercel.app">Live demo ↗</a></p>
+
+---
+
 # Rally
 
 **Your cohort, in sync.** A real-time comms platform where a cohort talks, recognizes the people who
