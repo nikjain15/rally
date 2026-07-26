@@ -57,8 +57,8 @@ export async function detectRecognitionsSmart(body: string): Promise<DetectedRec
   const text = await callClaude({
     feature: 'detect',
     model: MODELS.default,
-    // Extraction is a grounded classify — run it fully deterministic, never inventive.
-    temperature: 0,
+    // Extraction is a grounded classify. MODELS.default rejects sampling params, so determinism
+    // comes from the tightly-scoped system prompt (return-only-JSON, never-infer) rather than temperature.
     system:
       'You extract peer recognition from a chat message written by the HELPED person crediting ' +
       'someone. Return ONLY a JSON array of {"helperHandle": string (the @handle they credit, ' +

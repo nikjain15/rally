@@ -17,10 +17,22 @@ import Anthropic from '@anthropic-ai/sdk';
 export const MODELS = {
   // Brief is a bulk, low-stakes classify over many members — route it to the cheap tier, not the
   // priciest model. Escalation to a stronger tier is reserved for genuinely ambiguous input.
-  brief: 'claude-haiku-5',
+  brief: 'claude-haiku-4-5',
   default: 'claude-sonnet-5',
   escalate: 'claude-opus-4-8',
 } as const;
+
+/**
+ * Whether a model accepts sampling params (`temperature`/`top_p`/`top_k`). The current-generation
+ * reasoning models — Opus 5 / Opus 4.8 / Opus 4.7, Sonnet 5, Fable 5 — REJECT them with an HTTP 400,
+ * so we must omit the param entirely for those and rely on prompt design for determinism. Haiku 4.5
+ * (and older tiers) still accept it. Keep this a denylist of no-sampling prefixes so a new tier is
+ * treated as sampling-capable only when we've confirmed it, but our known reasoning models are safe.
+ */
+export function supportsSampling(model: string): boolean {
+  const NO_SAMPLING = ['claude-opus-5', 'claude-opus-4-8', 'claude-opus-4-7', 'claude-sonnet-5', 'claude-fable-5'];
+  return !NO_SAMPLING.some((m) => model.startsWith(m));
+}
 
 /**
  * Approximate list price per 1M tokens (USD), used only to ESTIMATE spend for telemetry — the
@@ -28,7 +40,7 @@ export const MODELS = {
  * default tier's price so an estimate is never silently zero.
  */
 export const MODEL_PRICING: Record<string, { inputPerMTok: number; outputPerMTok: number }> = {
-  'claude-haiku-5': { inputPerMTok: 1, outputPerMTok: 5 },
+  'claude-haiku-4-5': { inputPerMTok: 1, outputPerMTok: 5 },
   'claude-sonnet-5': { inputPerMTok: 3, outputPerMTok: 15 },
   'claude-opus-4-8': { inputPerMTok: 15, outputPerMTok: 75 },
 };
@@ -126,7 +138,10 @@ export async function callClaude(opts: {
     const res = await client.messages.create({
       model: opts.model,
       max_tokens: opts.maxTokens ?? 1024,
-      temperature: opts.temperature ?? 0,
+      // Only pass a sampling param to models that accept one. The reasoning tiers (Sonnet 5, Opus
+      // 4.8, ...) reject `temperature` with a 400; for those we omit it and lean on the grounded,
+      // constraining system prompts for determinism instead.
+      ...(supportsSampling(opts.model) ? { temperature: opts.temperature ?? 0 } : {}),
       system: opts.system,
       messages: [{ role: 'user', content: opts.prompt }],
     });
