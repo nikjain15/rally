@@ -3,6 +3,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { gatherBrief } from './brief-admin';
 import { busDb } from './admin';
 import { rememberShared } from './shared-context';
+import { selectRelevant } from './retrieval';
 
 /**
  * Server-side execution for the assistant's SAFE tools (read-only, or the user's own private
@@ -70,13 +71,19 @@ export async function runSafeTool(
     const chSnap = await db.collection('channels').where('memberUids', 'array-contains', uid).get();
     const ch = chSnap.docs.find((d) => String(d.data().name ?? '').toLowerCase() === wanted || d.id === wanted);
     if (!ch) return `You're not in a channel called "${wanted}" (or it doesn't exist). Only channels you belong to can be read.`;
-    const msgs = await ch.ref.collection('messages').orderBy('createdAt', 'desc').limit(80).get();
+    // Pull a broad candidate pool, then let retrieval pick the slice. With a `question` the ranker
+    // returns the messages that bear on it (BM25); without one it falls back to recency — the right
+    // selection for an unfocused summary. Top-level messages only (threads excluded). This is what
+    // finally uses the tool's `question` param, which was previously accepted but ignored.
+    const msgs = await ch.ref.collection('messages').orderBy('createdAt', 'desc').limit(300).get();
     const names = await profileNames(db);
-    const transcript = msgs.docs
+    const topLevel = msgs.docs
       .reverse()
       .filter((m) => !m.data().parentId)
-      .map((m) => `${names.get(m.data().authorUid) ?? 'member'}: ${m.data().body}`)
-      .join('\n');
+      .map((m) => ({ author: names.get(m.data().authorUid) ?? 'member', body: (m.data().body as string) ?? '' }));
+    const focus = String(input.question ?? '').trim();
+    const { selected } = selectRelevant(topLevel, focus, { topK: 40, window: 1 });
+    const transcript = selected.map((m) => `${m.author}: ${m.body}`).join('\n');
     return transcript
       ? `Recent messages in #${ch.data().name} (oldest first):\n${transcript}`
       : `#${ch.data().name} has no messages yet.`;

@@ -3,6 +3,7 @@ import { adminDb } from '@/lib/admin';
 import { verifyUid } from '@/lib/auth-server';
 import { MODELS, callClaude, hasModel } from '@/lib/agent';
 import { allow } from '@/lib/rate-guard';
+import { selectRelevant } from '@/lib/retrieval';
 
 export const runtime = 'nodejs';
 
@@ -45,17 +46,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 });
   }
 
+  // Pull a broad candidate pool (recent history), then RETRIEVE the messages actually relevant to
+  // the question with BM25 — not just the most recent. This is the difference between answering a
+  // question about a decision made 200 messages ago and missing it because it fell out of the
+  // recency window.
   const msgs = await db
     .collection('channels')
     .doc(body.channelId)
     .collection('messages')
     .orderBy('createdAt', 'desc')
-    .limit(80)
+    .limit(300)
     .get();
-  const transcript = msgs.docs
+  const candidates = msgs.docs
     .reverse()
-    .map((m) => `${m.data().authorUid}: ${m.data().body}`)
-    .join('\n');
+    .map((m) => ({ author: m.data().authorUid as string, body: (m.data().body as string) ?? '' }));
+
+  const { relevant, selected } = selectRelevant(candidates, body.question, { topK: 12, window: 2 });
+
+  // Bad-retrieval failure mode: nothing in the channel bears on the question. Abstain rather than
+  // hand the model an irrelevant window and invite a confident, wrong answer. Saves a model call too.
+  if (!relevant || selected.length === 0) {
+    const name = ch.data()?.name ?? 'this channel';
+    return NextResponse.json({
+      available: true,
+      grounded: false,
+      answer: `I couldn't find anything in #${name} about that. Try rephrasing, or ask in the channel directly.`,
+    });
+  }
+
+  const transcript = selected.map((m) => `${m.author}: ${m.body}`).join('\n');
 
   const answer = await callClaude({
     feature: 'ask',
@@ -74,5 +93,5 @@ export async function POST(req: Request) {
   if (answer == null) {
     return NextResponse.json({ available: false, answer: null }, { status: 503 });
   }
-  return NextResponse.json({ available: true, answer });
+  return NextResponse.json({ available: true, grounded: true, answer });
 }
