@@ -1,4 +1,4 @@
-# Rally - Technical Notes and Rubric Scorecard
+# Rally, Technical Notes and Rubric Scorecard
 
 Engineering detail behind Rally, and an honest 12-point scorecard with file-level evidence and
 gaps. Scores are self-assessed against a bar-raiser lens; the "gap" column is deliberately blunt.
@@ -25,7 +25,7 @@ formal eval harness, dynamic/cost-aware routing, and scale beyond a single cohor
 
 ## Model and orchestration details
 
-- **Single wrapper** (`lib/agent.ts`): `callClaude` returns `string | null` - missing
+- **Single wrapper** (`lib/agent.ts`): `callClaude` returns `string | null`, missing
   `ANTHROPIC_API_KEY` or any exception (rate limit, timeout, bad key, malformed response) all
   collapse to `null`, so callers have exactly one degradation path.
 - **Model tiers** (`MODELS`): `claude-opus-4-8` for the Brief (the highest-judgment classify
@@ -37,14 +37,14 @@ formal eval harness, dynamic/cost-aware routing, and scale beyond a single cohor
 - **Bounded agent loop:** `MAX_STEPS = 5`; safe tools execute server-side, propose tools return
   typed `Proposal`s and never execute.
 
-## Guardrails - the anti-gaming spine (verified)
+## Guardrails, the anti-gaming spine (verified)
 
 1. **Clients can never write points.** `xpEvents`, `recognitions`, `pulseEvents`, `cohortGoals`,
    `badges` are all `create/update/delete: false` in `firestore.rules`. Only the Admin SDK (which
    bypasses rules) writes them, from auth-gated routes.
 2. **No self-award, no client status-flip.** `confirmRecognition` requires
    `helpedUid === actingUid` and rejects `helperUid === actingUid`; status flips only inside the
-   server transaction that also writes the ledger - so "confirmed" and "awarded" are atomic.
+   server transaction that also writes the ledger, so "confirmed" and "awarded" are atomic.
 3. **Idempotent awards.** Ledger doc ids are deterministic (`xp_help_<recognitionId>`,
    `xp_commit_<commitmentId>`), so retries/replays award exactly once.
 4. **No count inflation.** Reactions are a uid-keyed map; the rule proves an update touches only
@@ -60,7 +60,7 @@ formal eval harness, dynamic/cost-aware routing, and scale beyond a single cohor
 ## Cost notes
 
 - **The expensive path is optional.** With the model off, every intelligence uses free
-  deterministic logic and the app is fully functional - the model is a quality upgrade, not a
+  deterministic logic and the app is fully functional, the model is a quality upgrade, not a
   dependency. This caps worst-case cost at zero and makes model spend a deliberate choice.
 - **Model calls are single-turn and small** (detection `maxTokens: 300`; assistant `1024`),
   routed to the cheapest sufficient tier per feature.

@@ -1,4 +1,4 @@
-# Rally - Architecture
+# Rally, Architecture
 
 Rally is a Next.js 16 (App Router) + React 19 + TypeScript app on Firestore, Firebase Auth
 (GitHub), and `@anthropic-ai/sdk`. Firestore is the realtime bus (`onSnapshot`, no custom
@@ -67,13 +67,13 @@ graph TD
 
 Client components only ever do what the rules allow: read channels they belong to, post as
 themselves, toggle their own reaction, and read their own private threads. Every points-bearing
-write happens server-side through the Admin SDK, which bypasses rules by design - so the rules
+write happens server-side through the Admin SDK, which bypasses rules by design, so the rules
 are free to deny those writes to all clients.
 
 ## The trust-ledger data flow (peer-confirmed, ungameable)
 
 This is the core of the product. Recognition is *suggested* (by detection or the assistant),
-*confirmed by the helped peer*, and only then does the helper earn points - written atomically to
+*confirmed by the helped peer*, and only then does the helper earn points, written atomically to
 the append-only ledger. No client can mint, self-award, or double-award.
 
 ```mermaid
@@ -105,7 +105,7 @@ sequenceDiagram
 
 - **Clients can never write points.** `firestore.rules`: `xpEvents`, `recognitions`,
   `pulseEvents` are `create/update/delete: false`. Confirming a recognition is a *server-only*
-  transaction because flipping status and writing XP must be one atomic act - an earlier version
+  transaction because flipping status and writing XP must be one atomic act, an earlier version
   that let clients flip status produced "confirmed-but-unawarded" states (`AGENTS.md` rule 5).
 - **You cannot award yourself.** `confirmRecognition` rejects `helperUid === actingUid`, and only
   the `helpedUid` can confirm. Detection only ever infers from the author crediting *someone
@@ -115,10 +115,10 @@ sequenceDiagram
   touches only the caller's own key (`reactionTogglesSelf`); uid-list toggles are set-checked with
   `noDuplicates` + `togglesOnlySelf`.
 - **Rank is derived, never stored.** `computeLeaderboard` sums the ledger and ranks in memory,
-  returning only the caller's rank, a +/-2 neighbor window, and the cooperative team total - the
+  returning only the caller's rank, a +/-2 neighbor window, and the cooperative team total, the
   full ordering never leaves the server ("be kind to the quiet").
 
-## The AI layer - no authority, always degradable
+## The AI layer, no authority, always degradable
 
 `lib/agent.ts` is the single model wrapper. `callClaude` returns text or `null` on missing key or
 any failure; `extractJson` parses and **schema-validates** model output before it is trusted.
@@ -134,7 +134,7 @@ Three intelligences sit on top, each with a deterministic baseline:
 into `SAFE_TOOLS` (read-only or write-to-own-private-memory: `catch_me_up`, `summarize_channel`,
 `my_commitments`, `find_teammate`, `remember`) which run server-side, and `PROPOSE_TOOLS`
 (`propose_commitment`, `propose_message`, `propose_recognition`, `propose_dispatch`) which
-**never execute** - they return a typed `Proposal` the user confirms with one tap. The model
+**never execute:** they return a typed `Proposal` the user confirms with one tap. The model
 literally has no tool that awards points, posts as the user, or confirms a recognition. A drafted
 recognition still goes through peer confirmation. This is the "AI has no authority" guardrail
 enforced structurally, not by prompt.
@@ -150,7 +150,7 @@ once via the ledger and posts a status line back to the source thread. Missing a
 nothing but is never penalized. With no `GITHUB_TOKEN`/`GITHUB_PM_REPO`, `resolvePmAdapter`
 returns null and the commitment is still recorded, just unlinked.
 
-## Cross-app interop (Pulse <-> Rally) - how real it is
+## Cross-app interop (Pulse <-> Rally), how real it is
 
 The shared-context bus is defined once as a pure contract in
 `@cohort/core/shared-context` (paths, types, `canTransition` lifecycle) and implemented on the
@@ -162,7 +162,7 @@ transactionally so a task is never worked twice.
 **Honest status:** *Rally-side complete; cross-app is a prototype/design.* Rally fully implements
 dispatch, inbox (claim + run through its own assistant + report back), shared memory read/write,
 and erasure. But **Pulse is not yet integrated** (`docs/SHARED-CONTEXT.md`, "Current state"), and
-there is no dedicated shared Firebase project yet - the bus *transparently falls back to Rally's
+there is no dedicated shared Firebase project yet, the bus *transparently falls back to Rally's
 own database*, so shared context works *within* Rally today and the two-app hand-off is designed
 and Rally-ready but not yet exercised end-to-end against a live Pulse agent. It is a credible,
 tested contract, not a running two-app demo.
@@ -195,7 +195,7 @@ sequenceDiagram
 ## Testing surface
 
 `npm run gate` runs typecheck, lint, and four test layers (~171 cases): **unit** (pure logic),
-**rules** (the anti-gaming / membership / privacy guarantees - the load-bearing tests),
+**rules** (the anti-gaming / membership / privacy guarantees, the load-bearing tests),
 **integration** (real client SDK + rules + realtime on the emulator, including an adversarial
 "break it" pass and a ~65-user / ~2,100-message perf pass), and **e2e** (signed-in browser
 flows). See `EVALS.md` for how this maps onto an eval strategy.

@@ -1,6 +1,6 @@
 # Deploying Rally to production (its own Vercel + Firebase)
 
-Rally deploys to its **own** target - never Pulse's `pm-nikjain15`. Two services: **Firebase**
+Rally deploys to its **own** target, never Pulse's `pm-nikjain15`. Two services: **Firebase**
 (auth + data) and **Vercel** (hosting). Steps marked 👤 need your accounts; the rest I can run.
 
 ## 1. 👤 Firebase project (auth + database)
@@ -14,7 +14,7 @@ Rally deploys to its **own** target - never Pulse's `pm-nikjain15`. Two services
        (`https://rally-nikjain15.firebaseapp.com/__/auth/handler`)
    - Paste the Client ID + Secret back into Firebase, Save.
 4. **Project settings → General → Your apps → Web app** → register → copy the `firebaseConfig`
-   values (apiKey, authDomain, projectId, …) - these fill the `NEXT_PUBLIC_FIREBASE_*` vars.
+   values (apiKey, authDomain, projectId, …), these fill the `NEXT_PUBLIC_FIREBASE_*` vars.
 5. **Project settings → Service accounts → Generate new private key** → download the JSON -
    this is `FIREBASE_SERVICE_ACCOUNT` (paste the whole JSON as one env value).
 6. Push the security rules to the project:
