@@ -1,0 +1,64 @@
+// Labeled recognition-detection set. One JSON object per line: {text, expected:[{helperHandle,kind}]}.
+// Ground truth = what a CORRECT detector should emit (helper the author credits + the kind of help).
+// Empty expected = a true negative. `//` lines and blank lines are ignored by parseLabeledJsonl.
+// Handles are lowercased; kind is one of answered|unblocked|reviewed|paired.
+//
+// --- clean positives: single mention, single unambiguous verb ---
+{"text": "thanks @alice for the help!", "expected": [{"helperHandle": "alice", "kind": "answered"}]}
+{"text": "@bob unblocked me on the emulator, huge thanks", "expected": [{"helperHandle": "bob", "kind": "unblocked"}]}
+{"text": "@carol reviewed my PR, really appreciate it", "expected": [{"helperHandle": "carol", "kind": "reviewed"}]}
+{"text": "@dana paired with me for an hour, so helpful", "expected": [{"helperHandle": "dana", "kind": "paired"}]}
+{"text": "huge kudos to @erin for jumping in", "expected": [{"helperHandle": "erin", "kind": "answered"}]}
+{"text": "shoutout @frank, you saved the deploy — thank you", "expected": [{"helperHandle": "frank", "kind": "answered"}]}
+{"text": "thank you @grace, that fixed it", "expected": [{"helperHandle": "grace", "kind": "answered"}]}
+{"text": "props to @heidi for the quick turnaround", "expected": [{"helperHandle": "heidi", "kind": "answered"}]}
+{"text": "ty @ivan!!", "expected": [{"helperHandle": "ivan", "kind": "answered"}]}
+{"text": "thx @judy for explaining the rules test", "expected": [{"helperHandle": "judy", "kind": "answered"}]}
+{"text": "@kevin answered my question about firestore indexes, thanks", "expected": [{"helperHandle": "kevin", "kind": "answered"}]}
+{"text": "@laura unblocked me on the auth flow this morning, thanks so much", "expected": [{"helperHandle": "laura", "kind": "unblocked"}]}
+{"text": "big thanks @mallory for reviewing the migration", "expected": [{"helperHandle": "mallory", "kind": "reviewed"}]}
+{"text": "@nate paired with me on the flaky test, appreciate you", "expected": [{"helperHandle": "nate", "kind": "paired"}]}
+{"text": "shout-out to @olivia, she answered every question in standup", "expected": [{"helperHandle": "olivia", "kind": "answered"}]}
+{"text": "thanks @peter for pairing on the deploy script", "expected": [{"helperHandle": "peter", "kind": "paired"}]}
+{"text": "@quinn reviewed my design doc line by line, thank you", "expected": [{"helperHandle": "quinn", "kind": "reviewed"}]}
+{"text": "cheers @ruth, you unblocked the whole team", "expected": [{"helperHandle": "ruth", "kind": "unblocked"}]}
+{"text": "thanks a ton @sam for answering on short notice", "expected": [{"helperHandle": "sam", "kind": "answered"}]}
+{"text": "appreciate you @tina for reviewing so fast, thanks", "expected": [{"helperHandle": "tina", "kind": "reviewed"}]}
+{"text": "@uma unblocked me when CI was red, kudos", "expected": [{"helperHandle": "uma", "kind": "unblocked"}]}
+{"text": "thank you @victor, that answer saved me an hour", "expected": [{"helperHandle": "victor", "kind": "answered"}]}
+{"text": "thanks @wendy-01 for pairing through the outage", "expected": [{"helperHandle": "wendy-01", "kind": "paired"}]}
+{"text": "props @xavier for the thorough review, thanks", "expected": [{"helperHandle": "xavier", "kind": "reviewed"}]}
+{"text": "@yara answered my dumb question without judgment, thank you", "expected": [{"helperHandle": "yara", "kind": "answered"}]}
+{"text": "shoutout @zoe for unblocking the release", "expected": [{"helperHandle": "zoe", "kind": "unblocked"}]}
+// --- clean positives: multi-mention, one shared verb ---
+{"text": "thanks @alice and @bob for reviewing the RFC", "expected": [{"helperHandle": "alice", "kind": "reviewed"}, {"helperHandle": "bob", "kind": "reviewed"}]}
+{"text": "@carol and @dana both unblocked me today, thank you both", "expected": [{"helperHandle": "carol", "kind": "unblocked"}, {"helperHandle": "dana", "kind": "unblocked"}]}
+{"text": "kudos @erin and @frank for pairing on the incident", "expected": [{"helperHandle": "erin", "kind": "paired"}, {"helperHandle": "frank", "kind": "paired"}]}
+// --- dedupe: same helper mentioned twice, one recognition ---
+{"text": "thanks @grace, @grace you are a lifesaver", "expected": [{"helperHandle": "grace", "kind": "answered"}]}
+// --- clean negatives: no mention ---
+{"text": "thanks everyone, that was a great session", "expected": []}
+{"text": "great standup today, appreciate the energy", "expected": []}
+{"text": "thank you all for the reviews this sprint", "expected": []}
+{"text": "kudos to the whole team for shipping", "expected": []}
+// --- clean negatives: mention but no gratitude/credit ---
+{"text": "hey @alice are you around for a sec?", "expected": []}
+{"text": "@bob can you take a look at the failing test?", "expected": []}
+{"text": "@carol what time is the demo tomorrow?", "expected": []}
+{"text": "moving the standup to 10am, cc @dana", "expected": []}
+{"text": "@erin the build is green now", "expected": []}
+// --- clean negatives: self-credit (author claims THEY helped) ---
+{"text": "I helped @frank with his PR today", "expected": []}
+{"text": "I unblocked @grace on the auth bug", "expected": []}
+{"text": "just paired with @heidi to fix the flake — glad I could help", "expected": []}
+// --- hard negatives: thanks-in-advance / requests (a request is not recognition of help given) ---
+{"text": "thanks in advance @mike for looking into this when you can", "expected": []}
+{"text": "@nate can you review this PR when you get a chance? thanks", "expected": []}
+{"text": "thanks ahead of time @olivia, would love your eyes on this", "expected": []}
+// --- hard negatives: sarcasm ---
+{"text": "oh great, @peter broke the build again 🙄 thanks a lot", "expected": []}
+{"text": "wow @quinn, real helpful merging over my changes. thanks.", "expected": []}
+// --- hard positives: gratitude with no keyword verb (recall stress) ---
+{"text": "@ruth saved my life today, could not have shipped without you", "expected": [{"helperHandle": "ruth", "kind": "answered"}]}
+{"text": "@sam you're a legend, that debugging session made my week", "expected": [{"helperHandle": "sam", "kind": "answered"}]}
+{"text": "honestly @tina carried me through the whole migration 🙏", "expected": [{"helperHandle": "tina", "kind": "answered"}]}

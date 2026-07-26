@@ -56,17 +56,22 @@ leaderboard ~16ms, numbers from the README's documented run).
 thread reactions, two-client @mention and realtime, search, onboarding, leaderboard opt-in, and
 the assistant panel. This validates the confirm-before-act loop end-to-end from the UI.
 
-## Layer 4, LLM-judge and model evals (ROADMAP)
+## Layer 4, model evals
 
-Not yet implemented; the design:
-
-- **Recognition-detection precision/recall/F1.** A labeled JSONL set of ~100 messages (positive:
-  varied gratitude phrasings and multi-mention; negative: self-credit, sarcasm, "thanks in
-  advance", no-mention) scored against both `detectRecognitions` (baseline) and
-  `detectRecognitionsSmart` (model layer). Target: the model layer must never do *worse* than
-  the baseline (that is the contract in `lib/detect-model.ts`). Report precision, recall, F1, and
-  the false-positive rate specifically, since a false positive is the costly error.
-- **Brief quality via LLM-judge.** Given a synthetic inbox, judge the brief on: did it surface
+- **Recognition-detection precision/recall/F1 (IMPLEMENTED).** `npm run test:evals` runs
+  `tests/evals/detection.test.ts` against a committed labeled JSONL set
+  (`tests/evals/data/recognition.labeled.jsonl`, 50 cases: varied gratitude phrasings and
+  multi-mention positives; self-credit, sarcasm, "thanks in advance", requests, and no-mention
+  negatives; plus keyword-free gratitude to stress recall). The scorer (`lib/eval-detect.ts`) is
+  pure and network-free — it runs in the same lane as unit, no emulator or model key needed. It
+  scores both `detectRecognitions` (baseline) and `detectRecognitionsSmart` (model layer) as
+  (helper, kind) pairs and reports precision, recall, F1, and the false-positive rate (the costly
+  error, tracked alone). The current baseline scores **precision 0.83 / recall 0.92 / F1 0.87 /
+  FP-rate 0.14**. The test asserts the contract in `lib/detect-model.ts`: the model layer is
+  **never worse** than the baseline on F1 and adds **no** false positives. With `ANTHROPIC_API_KEY`
+  absent (as in CI) the model layer falls back to the baseline, so the contract holds by
+  construction; with a key present the same test genuinely measures whether the model beats regex.
+- **Brief quality via LLM-judge (ROADMAP).** Given a synthetic inbox, judge the brief on: did it surface
   every real claim, invent zero urgency, and stay within three items. Scored by a judge model
   with a rubric; report pass rate and the invented-urgency rate (must be ~0).
 - **Assistant faithfulness.** Judge that a proposal matches the user's intent and that the reply
@@ -96,7 +101,8 @@ population to split, the experiments worth running:
 ## How to run today
 
 ```bash
-npm run gate        # typecheck, lint, unit, rules, integration, e2e smoke
+npm run gate        # typecheck, lint, unit, evals, rules, integration, e2e smoke
+npm run test:evals  # detection precision/recall/F1 vs the labeled set (no emulator needed)
 npm run test:e2e    # full signed-in browser flows against the emulator
 ```
 
