@@ -1,11 +1,11 @@
-# Rally - Evaluation strategy
+# Rally, Evaluation strategy
 
 Rally's intelligences are low-stakes by construction: the model never writes a points-bearing
 row, and every AI path has a deterministic fallback. That shifts the eval burden. The questions
 that matter here are not "is the model perfect" but "is the *ungameable* guarantee actually
 unbreakable" and "is the deterministic layer correct on its own." This document maps Rally's
 current tests onto the standard ladder (unit -> LLM-judge -> model evals -> A/B) and marks what is
-implemented vs. roadmap. Nothing here is fabricated - implemented items point at real files.
+implemented vs. roadmap. Nothing here is fabricated, implemented items point at real files.
 
 ## What "correct" means for each intelligence
 
@@ -18,12 +18,12 @@ implemented vs. roadmap. Nothing here is fabricated - implemented items point at
 Because the guardrail (not the model) is what protects users, **the rules tests are Rally's most
 important evals.**
 
-## Layer 1 - Unit / deterministic (IMPLEMENTED)
+## Layer 1, Unit / deterministic (IMPLEMENTED)
 
-`npm run test:unit` - pure logic, no model, no Firestore. Covers the exact behaviors an eval set
+`npm run test:unit`, pure logic, no model, no Firestore. Covers the exact behaviors an eval set
 would target:
 
-- **Detection** (`tests/unit/detect.test.ts`): the gratitude grammar - correct helper/kind
+- **Detection** (`tests/unit/detect.test.ts`): the gratitude grammar, correct helper/kind
   extraction, dedupe, and the critical negative cases (a message that credits no one yields
   nothing; the author never credits themselves).
 - **Brief ranking** (`tests/unit/brief.test.ts`): recognition-awaiting-confirm outranks a due
@@ -37,7 +37,7 @@ would target:
 These are effectively a **precision/recall harness for the deterministic baseline** already: the
 detection negative cases are exactly the false-positive guards an eval would score.
 
-## Layer 2 - Anti-gaming / rules evals (IMPLEMENTED - the load-bearing layer)
+## Layer 2, Anti-gaming / rules evals (IMPLEMENTED, the load-bearing layer)
 
 `npm run test:rules` runs `tests/rules/firestore.test.ts` against the Firestore emulator. These
 assert the trust guarantees directly: a client cannot write `xpEvents`, cannot flip a recognition
@@ -48,15 +48,15 @@ model-eval in spirit: it evaluates the *system's* safety property, not a prompt.
 
 `npm run test:integration` adds a real-SDK adversarial "break it" pass plus assistant-memory
 persistence and a ~65-user / ~2,100-message perf pass (channel load ~73ms, brief ~69ms,
-leaderboard ~16ms - numbers from the README's documented run).
+leaderboard ~16ms, numbers from the README's documented run).
 
-## Layer 3 - E2E behavioral (IMPLEMENTED)
+## Layer 3, E2E behavioral (IMPLEMENTED)
 
 `npm run test:e2e` drives signed-in browser flows on the emulator: send/react/edit/delete,
 thread reactions, two-client @mention and realtime, search, onboarding, leaderboard opt-in, and
 the assistant panel. This validates the confirm-before-act loop end-to-end from the UI.
 
-## Layer 4 - LLM-judge and model evals (ROADMAP)
+## Layer 4, LLM-judge and model evals (ROADMAP)
 
 Not yet implemented; the design:
 
@@ -72,7 +72,7 @@ Not yet implemented; the design:
 - **Assistant faithfulness.** Judge that a proposal matches the user's intent and that the reply
   never claims to have *done* something it only drafted.
 
-## Layer 5 - A/B (ROADMAP, needs external users)
+## Layer 5, A/B (ROADMAP, needs external users)
 
 The pilot is a single 65-person cohort with no external users, so no A/B has run. When there is
 population to split, the experiments worth running:
