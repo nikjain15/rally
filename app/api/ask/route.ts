@@ -58,7 +58,11 @@ export async function POST(req: Request) {
     .join('\n');
 
   const answer = await callClaude({
+    feature: 'ask',
     model: MODELS.default,
+    // Grounded summary: low temperature keeps it close to the transcript, a little above 0 so the
+    // phrasing reads human rather than clipped. It still must not invent (see the system prompt).
+    temperature: 0.3,
     system:
       'You are Rally, a concise assistant summarising a cohort channel. Answer only from the ' +
       'transcript provided. If the answer is not in it, say so plainly. Never invent decisions ' +
