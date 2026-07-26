@@ -194,7 +194,8 @@ sequenceDiagram
 
 ## Testing surface
 
-`npm run gate` runs typecheck, lint, and four test layers (~171 cases): **unit** (pure logic),
+`npm run gate` runs typecheck, lint, and five test layers (~200 cases): **unit** (pure logic),
+**evals** (recognition-detection precision/recall/F1 vs. a labeled set),
 **rules** (the anti-gaming / membership / privacy guarantees, the load-bearing tests),
 **integration** (real client SDK + rules + realtime on the emulator, including an adversarial
 "break it" pass and a ~65-user / ~2,100-message perf pass), and **e2e** (signed-in browser

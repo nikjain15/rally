@@ -1,8 +1,10 @@
 # Rally, Product Requirements
 
-Rally is an AI-first, gamified alternative to Slack and Discord: a real-time comms platform
-with a trust layer that turns everyday conversation into recognition, motivation, and
-follow-through. This PRD is grounded in the shipped code (see `ARCHITECTURE.md` for file
+Rally is an AI-optional, trust-first gamified alternative to Slack and Discord: a real-time comms
+platform with a trust layer that turns everyday conversation into recognition, motivation, and
+follow-through. It is "AI-optional" by design — every feature works with the model switched off and
+the AI is a quality upgrade, never a dependency (see `TECHNICAL_NOTES.md`); the load-bearing
+innovation is the trust layer, not the model. This PRD is grounded in the shipped code (see `ARCHITECTURE.md` for file
 references); anything not yet live is marked as roadmap.
 
 ## The problem

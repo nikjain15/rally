@@ -10,7 +10,9 @@
 # Rally
 
 **Your cohort, in sync.** A real-time comms platform where a cohort talks, recognizes the people who
-help, and keeps the commitments they make, with a built-in assistant that can act on your behalf.
+help, and keeps the commitments they make, with a built-in assistant that drafts actions you confirm
+with one tap. Rally is **AI-optional and trust-first**: every feature works with the model switched
+off, and the load-bearing innovation is the trust layer, not the model.
 
 **▶ Live demo: [rally-nikjain15.vercel.app](https://rally-nikjain15.vercel.app):** sign in with GitHub.
 
@@ -88,12 +90,14 @@ GitHub switched off, the live smart/PM features only need the env below.
 ## Testing
 
 ```bash
-npm run gate           # typecheck · lint · unit · rules · integration · e2e smoke
+npm run gate           # typecheck · lint · unit · evals · rules · integration · e2e smoke
 npm run test:e2e       # signed-in browser e2e against the emulator
 ```
 
 - **unit:** pure logic: detection, brief ranking, points, rate-limit, unread, @mention parsing,
-  search, commitment nudges, assistant tool routing, model-output parsing.
+  search, commitment nudges, assistant tool routing, model-output parsing, cost telemetry, BM25 retrieval.
+- **evals:** recognition-detection precision/recall/F1 against a committed labeled set, asserting the
+  model layer is never worse than the deterministic baseline (`npm run test:evals`).
 - **rules:** the anti-gaming / membership / privacy guarantees (the load-bearing tests).
 - **integration:** the real client SDK + rules + realtime on the emulator, including an adversarial
   "break it" pass, assistant memory persistence, and a cohort-scale perf pass (~65 users / ~2,100
@@ -126,7 +130,7 @@ Deeper product and engineering write-ups live in [`docs/`](docs/):
 - [EVALS.md](docs/EVALS.md), the eval strategy (unit -> rules/anti-gaming -> e2e -> LLM-judge/A-B), named metrics, and what's implemented vs. roadmap.
 - [TECHNICAL_NOTES.md](docs/TECHNICAL_NOTES.md), the 12-point technical scorecard with file-level evidence, model/orchestration details, guardrails, and cost notes.
 - [FDE_JOURNEY.md](docs/FDE_JOURNEY.md), how Rally deploys into a live environment: integrations, secrets, rollout/cutover, observability, de-risking.
-- [SHARED-CONTEXT.md](docs/SHARED-CONTEXT.md), the cross-app context bus and agent-to-agent dispatch contract.
+- [SHARED-CONTEXT.md](docs/SHARED-CONTEXT.md), the cross-app context-bus and agent-to-agent dispatch **mechanism** — Rally-side complete and a designed contract for a second app; today it runs single-app, transparently falling back to Rally's own database until a shared project and a second app exist.
 
 ## License
 

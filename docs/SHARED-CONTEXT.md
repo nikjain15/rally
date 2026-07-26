@@ -60,7 +60,11 @@ transactional, so a task is never worked twice.
    addressed to you), see Rally's [`app/api/assistant/dispatch`](../app/api/assistant/dispatch/route.ts)
    and [`inbox`](../app/api/assistant/inbox/route.ts). Poll `/inbox` when your agent surface opens.
 
-That's it, the two apps now share one brain and can call each other's agents.
+That's it — once a second app implements this contract and both point at the shared project, they
+share one context layer and can call each other's agents. **Today only Rally implements it**, and
+with no shared project configured the bus falls back to Rally's own database (see below), so the
+mechanism is real and Rally-side complete, but the cross-app link is a prototype awaiting a second
+app — not a live two-app deployment.
 
 ## Setup: the dedicated shared Firebase project
 
