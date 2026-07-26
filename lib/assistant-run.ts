@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Firestore } from 'firebase-admin/firestore';
-import { MODELS } from './agent';
+import { MODELS, recordUsage } from './agent';
 import { busDb } from './admin';
 import { ASSISTANT_TOOLS, isProposeTool, isSafeTool, toProposal, type Proposal } from './assistant';
 import { getHandle, loadMemory, loadThread, runSafeTool, saveTurn } from './assistant-admin';
@@ -59,10 +59,19 @@ export async function runAssistant(
       const res = await client.messages.create({
         model: MODELS.default,
         max_tokens: 1024,
+        // Low, non-zero: the assistant should read as warm and human, but a tool-use loop that
+        // must pick the right tool wants near-deterministic decisions, not creative ones.
+        temperature: 0.3,
         system: systemPrompt(memory),
         tools: ASSISTANT_TOOLS as unknown as Anthropic.Tool[],
         messages,
       });
+      if (res.usage) {
+        recordUsage('assistant', MODELS.default, {
+          inputTokens: res.usage.input_tokens ?? 0,
+          outputTokens: res.usage.output_tokens ?? 0,
+        });
+      }
       const toolUses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
       const textOut = res.content
         .filter((b): b is Anthropic.TextBlock => b.type === 'text')
