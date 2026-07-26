@@ -22,6 +22,16 @@ export default defineConfig({
       {
         resolve: { alias },
         test: {
+          name: 'evals',
+          // Detection precision/recall/F1 against a committed labeled set. Pure and network-free
+          // (no emulator, no model key needed), so it runs in the same fast lane as unit.
+          include: ['tests/evals/**/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
           name: 'rules',
           include: ['tests/rules/**/*.test.ts'],
           environment: 'node',
