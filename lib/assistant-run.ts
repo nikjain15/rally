@@ -1,39 +1,31 @@
-import Anthropic from '@anthropic-ai/sdk';
 import type { Firestore } from 'firebase-admin/firestore';
-import { MODELS, recordUsage, supportsSampling } from './agent';
 import { busDb } from './admin';
-import { ASSISTANT_TOOLS, isProposeTool, isSafeTool, toProposal, type Proposal } from './assistant';
-import { getHandle, loadMemory, loadThread, runSafeTool, saveTurn } from './assistant-admin';
+import type { Proposal } from './assistant';
+import { getHandle, loadMemory, loadThread, saveTurn } from './assistant-admin';
 import { logSharedActivity, readSharedMemory } from './shared-context';
+import type { ChatMessage } from './conduit/agent/core';
+import {
+  ASSISTANT_SKILLS,
+  MAX_AGENT_STEPS,
+  assistantSystemPrompt,
+  buildAssistantTools,
+  buildCallModel,
+} from './assistant-agent';
+import { runAgentViaConduit } from './conduit/rally-client';
 
 /**
- * The bounded Claude tool-use loop for the Home assistant. Lives in lib (not the route) so the
- * model SDK stays out of app/ — the loop reads only what the caller could already read, executes
- * SAFE tools server-side, turns write-tools into proposals for the user to confirm, and persists
- * the exchange to the user's private thread. The model has no authority; it drafts, never acts.
+ * The Home assistant, run as a genuine bounded reason-act loop on the vendored `@conduit/agent`
+ * `runAgent`. Lives in lib (not the route) so the model path stays out of app/. The loop reads only
+ * what the caller could already read, drafts actions the user confirms, and has NO authority: it
+ * never awards points, never posts as the user, and runs with `allowSideEffects: false` so no
+ * side-effecting tool can execute. The model classifies, summarises, and drafts; it never acts.
+ *
+ * Every model step is routed through the embedded @conduit/client seam (buildCallModel →
+ * inferViaConduit), so the loop stays metered and gateway-reported on the same tier cascade the
+ * rest of Rally uses. The whole path still degrades gracefully: with no model key the underlying
+ * call returns null and the loop ends with a safe fallback.
  */
-const MAX_STEPS = 5;
-
 export type AssistantResult = { available: boolean; reply: string | null; proposals: Proposal[] };
-
-function systemPrompt(memory: string[]): string {
-  const base = [
-    'You are Rally, a warm, concise assistant that lives inside the Rally cohort app.',
-    'You help the user talk to their cohort, recognize teammates who help them, and keep the commitments they make.',
-    '',
-    'Rules you never break:',
-    '- You are always "Rally". Never call yourself a model, a bot, or any brand.',
-    '- You can READ what the user could already read, and DRAFT actions. You never award points, never post as the user, and never confirm a recognition. Those are proposals the user confirms with one tap.',
-    '- Recognition is peer-confirmed: proposing it only lets the helped teammate confirm later. You cannot grant points.',
-    '- Be kind. Never shame anyone. Missing a commitment is never punished.',
-    '- Prefer calling a tool over guessing. For "what did I miss / what\'s up", use catch_me_up.',
-    '- Keep replies short and human. When you draft something, tell the user it is waiting for their confirm.',
-  ];
-  if (memory.length) {
-    base.push('', 'What you remember about this user:', ...memory.map((n) => `- ${n}`));
-  }
-  return base.join('\n');
-}
 
 export async function runAssistant(
   db: Firestore,
@@ -45,74 +37,36 @@ export async function runAssistant(
   // Merge app-local memory with the shared cross-app memory so the assistant carries one history.
   const shared = handle ? await readSharedMemory(busDb() ?? db, handle) : [];
   const memory = [...localMemory, ...shared.map((n) => `[${n.app}] ${n.text}`)];
-  const messages: Anthropic.MessageParam[] = [
-    ...history.map((m) => ({ role: m.role, content: m.content })),
-    { role: 'user', content: message },
-  ];
+  const priorTurns: ChatMessage[] = history.map((m) => ({ role: m.role, content: m.content }));
 
   const proposals: Proposal[] = [];
   let finalText = '';
 
   try {
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    for (let step = 0; step < MAX_STEPS; step++) {
-      const res = await client.messages.create({
-        model: MODELS.default,
-        max_tokens: 1024,
-        // MODELS.default is a reasoning tier that rejects `temperature` (HTTP 400), so we do not
-        // send one; the constraining system prompt keeps tool selection near-deterministic. If this
-        // is ever pointed at a sampling-capable tier, add `temperature` back behind supportsSampling.
-        ...(supportsSampling(MODELS.default) ? { temperature: 0.3 } : {}),
-        system: systemPrompt(memory),
-        tools: ASSISTANT_TOOLS as unknown as Anthropic.Tool[],
-        messages,
-      });
-      if (res.usage) {
-        recordUsage('assistant', MODELS.default, {
-          inputTokens: res.usage.input_tokens ?? 0,
-          outputTokens: res.usage.output_tokens ?? 0,
-        });
-      }
-      const toolUses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
-      const textOut = res.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map((b) => b.text)
-        .join(' ')
-        .trim();
-      if (textOut) finalText = textOut;
-
-      if (res.stop_reason !== 'tool_use' || toolUses.length === 0) break;
-
-      messages.push({ role: 'assistant', content: res.content });
-      const toolResults: Anthropic.ToolResultBlockParam[] = [];
-      for (const tu of toolUses) {
-        const input = (tu.input ?? {}) as Record<string, unknown>;
-        if (isSafeTool(tu.name)) {
-          const out = await runSafeTool(db, uid, tu.name, input, nowMs, handle);
-          toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: out });
-        } else if (isProposeTool(tu.name)) {
-          const p = toProposal(tu.name, input);
-          if (p) proposals.push(p);
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: tu.id,
-            content: p ? 'Drafted and shown to the user to confirm.' : 'Could not draft that.',
-          });
-        } else {
-          toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: 'Unknown tool.' });
-        }
-      }
-      messages.push({ role: 'user', content: toolResults });
-    }
+    const tools = buildAssistantTools({ db, uid, nowMs, handle, proposals });
+    const callModel = buildCallModel({ feature: 'assistant' });
+    const result = await runAgentViaConduit(
+      {
+        tools,
+        skills: ASSISTANT_SKILLS,
+        callModel,
+        maxSteps: MAX_AGENT_STEPS,
+        system: assistantSystemPrompt(memory, priorTurns),
+        context: message,
+        allowSideEffects: false, // no-authority invariant: side-effecting tools are refused by default.
+      },
+      message,
+    );
+    finalText = (result.answer ?? '').trim();
   } catch {
     return { available: false, reply: null, proposals: [] };
   }
 
-  if (!finalText) finalText = proposals.length ? "Here's what I drafted — confirm below to go ahead." : 'Done.';
+  if (!finalText) finalText = proposals.length ? "Here's what I drafted. Confirm below to go ahead." : 'Done.';
   await saveTurn(db, uid, message, finalText, proposals, nowMs);
 
   // Record the interaction on the shared bus so the user's cross-app history is complete. We log a
-  // concise summary (the request + what was drafted), never the full model output — data
+  // concise summary (the request plus what was drafted), never the full model output: data
   // minimization. Best-effort: a bus hiccup must never fail the turn.
   if (handle) {
     const drafted = proposals.length ? ` · drafted ${proposals.map((p) => p.kind).join(', ')}` : '';
