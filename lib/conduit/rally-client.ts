@@ -9,6 +9,26 @@ import type {
 import { callClaudeDetailed, type CallClaudeOpts } from '@/lib/agent';
 import { selectRelevant, type RankableMessage } from '@/lib/retrieval';
 import { reportDecision } from './reporter';
+import { runAgent } from './agent';
+import type { CallModel, RunAgentResult, Skill, Tool } from './agent';
+
+/**
+ * The Rally-side binding the embedded `runAgent` needs. The vendored loop is pure with respect to
+ * IO: the caller injects the model call and every tool handler, so the bind carries exactly those
+ * plus the run shape. `allowSideEffects` defaults to false (the no-authority invariant), and no
+ * tool in Rally's set is side-effecting, so a write can never execute through this seam.
+ */
+export interface RallyAgentBind {
+  tools: readonly Tool[];
+  skills?: readonly Skill[];
+  callModel: CallModel;
+  maxSteps: number;
+  system?: string;
+  context?: string;
+  allowSideEffects?: boolean;
+  /** Captures the full loop trace (answer, steps, cap, loaded skills) the thin client return drops. */
+  onResult?: (result: RunAgentResult) => void;
+}
 
 /**
  * The Conduit seam (docs/MCP.md, VENDOR.md).
@@ -43,6 +63,8 @@ interface ClientBind {
   candidates?: RankableMessage[];
   /** Captures the full metered record `resolve` produced. */
   onResult?: (result: InferResult) => void;
+  /** The bounded agent loop binding, when this client is used to run `runAgent`. */
+  agent?: RallyAgentBind;
 }
 
 /**
@@ -102,8 +124,27 @@ export function createRallyClient(bind: ClientBind = {}): ConduitClient {
       };
     },
     retrieve: rallyRetrieve(bind.candidates ?? []),
-    runAgent: async () => {
-      throw new Error('conduit.runAgent is not enabled in Rally embedded mode');
+    runAgent: async (params) => {
+      // The bounded reason-act loop, wired for real. The Rally agent binding (tools, skills, the
+      // metered model-call adapter) is injected before use; without it the client is not an agent
+      // runner, so we say so plainly rather than pretend. `allowSideEffects` defaults false: the
+      // no-authority invariant means a side-effecting tool is refused, never executed.
+      const agent = bind.agent;
+      if (!agent) {
+        throw new Error('conduit.runAgent needs a Rally agent binding (tools + callModel) to run');
+      }
+      const result = await runAgent({
+        goal: params.goal,
+        tools: agent.tools,
+        skills: agent.skills,
+        callModel: agent.callModel,
+        maxSteps: params.maxSteps ?? agent.maxSteps,
+        system: agent.system,
+        context: agent.context,
+        allowSideEffects: agent.allowSideEffects ?? false,
+      });
+      agent.onResult?.(result);
+      return { answer: result.answer ?? '', steps: result.steps };
     },
     evaluate: async () => {
       throw new Error('conduit.evaluate is not enabled in Rally embedded mode');
@@ -152,4 +193,19 @@ export async function inferViaConduit(call: RallyResolveBind): Promise<InferViaC
   // record.output is '' only when the model was off/failed (resolve degraded).
   const text = record.output === '' ? null : record.output;
   return { text, record };
+}
+
+/**
+ * THE seam the Home assistant uses: run the bounded reason-act loop through `@conduit/client`
+ * (embedded), so the agent path flows through Conduit's unified interface exactly as the Ask and
+ * detect paths do. Every model step inside the loop is itself routed through `inferViaConduit`
+ * (via the injected `callModel`), so each step stays metered and gateway-reported. Returns the full
+ * loop trace (answer, steps, cap, loaded skills), which the thin client `AgentResult` drops.
+ */
+export async function runAgentViaConduit(agent: RallyAgentBind, goal: string): Promise<RunAgentResult> {
+  let captured: RunAgentResult | undefined;
+  const client = createRallyClient({ agent: { ...agent, onResult: (r) => (captured = r) } });
+  await client.runAgent({ goal, maxSteps: agent.maxSteps });
+  // `captured` is always set: onResult fires synchronously inside the awaited runAgent.
+  return captured as RunAgentResult;
 }

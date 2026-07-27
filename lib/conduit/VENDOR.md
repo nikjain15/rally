@@ -5,6 +5,7 @@ packages, taken from their published `src/`:
 
 - `client/` = `@conduit/client` (`packages/client/src`)
 - `mcp/` = `@conduit/mcp` (`packages/mcp/src`)
+- `agent/` = `@conduit/agent` (`packages/agent/src`)
 
 Upstream: https://github.com/nikjain15/conduit
 
@@ -23,7 +24,13 @@ so the tree typechecks without the SDK installed.
 
 Imports inside each package are relative (`./types`, `./registry.ts`), so the
 copies resolve locally with no path rewriting. Rally code imports them as
-`@/lib/conduit/client` and `@/lib/conduit/mcp`.
+`@/lib/conduit/client`, `@/lib/conduit/mcp`, and `@/lib/conduit/agent`.
+
+One adjustment: upstream `agent/loop.ts` imports its `ChatMessage` type from
+`@conduit/inference`. Rally does not vendor the inference package (it injects its
+own model call), so the import is repointed at `agent/core.ts`, a one-line
+re-export of the same structural shape the vendored client already defines. That
+is the only edit to the agent copy; everything else is a clean overwrite.
 
 ## Updating
 
