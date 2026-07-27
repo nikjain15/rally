@@ -18,6 +18,7 @@
     "gate": "npm run typecheck && npm run lint && npm run test:unit && npm run test:evals && npm run test:rules && npm run test:integration && npm run test:e2e:smoke",
     "dev:emulator": "NEXT_PUBLIC_USE_EMULATOR=1 NEXT_PUBLIC_EMULATOR_PROJECT=demo-rally next dev",
     "explore": "bash scripts/explore.sh",
+    "mcp:stdio": "tsx lib/mcp/stdio-entry.ts",
     "sync:core": "npm --prefix ../cohort-common run build && rm -rf vendor/cohort-core/dist vendor/cohort-core/src && cp -R ../cohort-common/dist vendor/cohort-core/dist && cp -R ../cohort-common/src vendor/cohort-core/src && cp ../cohort-common/package.json vendor/cohort-core/package.json"
   },
   "dependencies": {

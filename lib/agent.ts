@@ -117,8 +117,8 @@ export function hasModel(): boolean {
   return !!process.env.ANTHROPIC_API_KEY;
 }
 
-/** Call Claude for a single-turn completion. Returns the text, or null on absence/any failure. */
-export async function callClaude(opts: {
+/** Options for a single-turn Claude completion, shared by the text and detailed entry points. */
+export type CallClaudeOpts = {
   model: string;
   system: string;
   prompt: string;
@@ -130,11 +130,34 @@ export async function callClaude(opts: {
   temperature?: number;
   /** Label for cost attribution in the meter. Defaults to the model id. */
   feature?: string;
-}): Promise<string | null> {
+};
+
+/**
+ * The metered result of one call: the text (null when the model returned no text block) plus the
+ * usage/cost/latency the Conduit seam surfaces as a metered decision. Cost reuses `estimateCostUsd`,
+ * the exact same math the in-process meter uses, so the seam adds no second source of truth.
+ */
+export type CallClaudeResult = {
+  text: string | null;
+  model: string;
+  usage: Usage;
+  costUsd: number;
+  latencyMs: number;
+};
+
+/**
+ * Call Claude and return the full metered record, or null on absence/any failure. This is the
+ * single Anthropic entry point; `callClaude` is the thin text-only wrapper over it, so the meter
+ * line, the sampling-contract gate, and the degrade-to-null behaviour are defined here once and
+ * shared. The Conduit embedded core (lib/conduit/rally-client.ts) calls this so the answer flows
+ * through Conduit's unified interface while cost accounting stays unchanged.
+ */
+export async function callClaudeDetailed(opts: CallClaudeOpts): Promise<CallClaudeResult | null> {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return null;
   try {
     const client = new Anthropic({ apiKey: key });
+    const startedAt = Date.now();
     const res = await client.messages.create({
       model: opts.model,
       max_tokens: opts.maxTokens ?? 1024,
@@ -145,18 +168,27 @@ export async function callClaude(opts: {
       system: opts.system,
       messages: [{ role: 'user', content: opts.prompt }],
     });
+    const latencyMs = Date.now() - startedAt;
+    const usage: Usage = {
+      inputTokens: res.usage?.input_tokens ?? 0,
+      outputTokens: res.usage?.output_tokens ?? 0,
+    };
     if (res.usage) {
-      recordUsage(opts.feature ?? opts.model, opts.model, {
-        inputTokens: res.usage.input_tokens ?? 0,
-        outputTokens: res.usage.output_tokens ?? 0,
-      });
+      recordUsage(opts.feature ?? opts.model, opts.model, usage);
     }
     const block = res.content.find((b) => b.type === 'text');
-    return block && block.type === 'text' ? block.text : null;
+    const text = block && block.type === 'text' ? block.text : null;
+    return { text, model: opts.model, usage, costUsd: estimateCostUsd(opts.model, usage), latencyMs };
   } catch {
     // Rate limit, timeout, bad key, malformed response — all the same to the caller: degrade.
     return null;
   }
+}
+
+/** Call Claude for a single-turn completion. Returns the text, or null on absence/any failure. */
+export async function callClaude(opts: CallClaudeOpts): Promise<string | null> {
+  const res = await callClaudeDetailed(opts);
+  return res ? res.text : null;
 }
 
 /**
