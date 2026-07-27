@@ -1,4 +1,5 @@
-import { MODELS, callClaude, extractJson, hasModel } from './agent';
+import { MODELS, extractJson, hasModel } from './agent';
+import { inferViaConduit } from './conduit/rally-client';
 import { detectRecognitions, type DetectedRecognition } from './detect';
 
 /**
@@ -82,7 +83,7 @@ export async function detectRecognitionsSmart(body: string): Promise<DetectedRec
 
   // 1. Bulk pass on the cheap tier. Haiku accepts sampling, so determinism comes from temperature 0
   //    plus the tightly-scoped system prompt (return-only-JSON, never-infer).
-  const briefText = await callClaude({
+  const { text: briefText } = await inferViaConduit({
     feature: 'detect',
     model: MODELS.brief,
     system: DETECT_SYSTEM,
@@ -98,7 +99,7 @@ export async function detectRecognitionsSmart(body: string): Promise<DetectedRec
   //    the confidence gate is exactly the "ambiguous turn" the escalate tier is reserved for.
   const ambiguous = parsed.some((d) => typeof d.confidence === 'number' && d.confidence < CONFIDENCE_THRESHOLD);
   if (ambiguous) {
-    const escalateText = await callClaude({
+    const { text: escalateText } = await inferViaConduit({
       feature: 'detect-escalate',
       model: MODELS.escalate,
       system: DETECT_SYSTEM,

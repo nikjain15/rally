@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/admin';
 import { verifyUid } from '@/lib/auth-server';
-import { MODELS, callClaude, hasModel } from '@/lib/agent';
+import { MODELS, hasModel } from '@/lib/agent';
+import { inferViaConduit } from '@/lib/conduit/rally-client';
 import { allow } from '@/lib/rate-guard';
 import { selectRelevant } from '@/lib/retrieval';
 
@@ -76,7 +77,7 @@ export async function POST(req: Request) {
 
   const transcript = selected.map((m) => `${m.author}: ${m.body}`).join('\n');
 
-  const answer = await callClaude({
+  const { text: answer } = await inferViaConduit({
     feature: 'ask',
     model: MODELS.default,
     // Grounded summary. MODELS.default rejects sampling params, so faithfulness is enforced by the

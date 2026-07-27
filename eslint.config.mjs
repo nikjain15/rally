@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored, copied-verbatim Conduit SDK (see lib/conduit/VENDOR.md). Rally-authored wiring
+    // (rally-client.ts, reporter.ts, lib/mcp/**) is NOT ignored and is linted normally.
+    "lib/conduit/client/**",
+    "lib/conduit/mcp/**",
   ]),
 ]);
 

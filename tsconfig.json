@@ -9,6 +9,9 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // The vendored @conduit/client (lib/conduit/client) is copied verbatim from upstream and its
+    // internal imports carry explicit `.ts` extensions. Safe under noEmit (bundler resolution).
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
