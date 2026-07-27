@@ -69,7 +69,9 @@ commitments run through everything:
 | Recognition detection (deterministic baseline + model layer) | **Live** | `lib/detect.ts`, `lib/detect-model.ts` |
 | Commitment tracking -> GitHub issue; closed = kept | **Live (config-gated)** | `lib/commitment-admin.ts`, `lib/pm-adapter.ts`, `app/api/github/webhook`. Degrades to unlinked when no `GITHUB_TOKEN`/`GITHUB_PM_REPO`. |
 | "Catch me up" brief | **Live** | `lib/brief.ts`, `lib/brief-admin.ts` |
-| Personalized assistant (Claude tool-use loop + private memory) | **Live** | `lib/assistant.ts`, `lib/assistant-run.ts` |
+| Personalized assistant (bounded reason-act agent on `@conduit/agent` + private memory + intent-selected skills) | **Live** | `lib/assistant.ts`, `lib/assistant-agent.ts`, `lib/assistant-run.ts` |
+| Read-only MCP server (`search_channel`, `get_recognitions`; identity-bound, no write tools) | **Live** | `lib/mcp/`, `docs/MCP.md` |
+| Metered model seam via embedded `@conduit/client` + env-gated gateway usage reporter | **Live** | `lib/conduit/rally-client.ts`, `lib/conduit/reporter.ts`. Gateway reporting is a no-op unless `CONDUIT_GATEWAY_*` is set; Conduit `evaluate` is a stub. |
 | Neighbors-only, kind leaderboard + cooperative team goal | **Live** | `lib/leaderboard-admin.ts` |
 | Quests / badges | **Live** | `lib/quest-admin.ts`, rules `quests`/`badges` |
 | Cross-app shared memory + activity + agent-to-agent dispatch | **Rally-side live; cross-app prototype** | `lib/shared-context.ts`, `app/api/assistant/dispatch`, `inbox`. Pulse not yet integrated; bus falls back to Rally's own DB (see `docs/SHARED-CONTEXT.md`). |
@@ -113,8 +115,8 @@ acknowledged help, hard to fake because it needs a second person to confirm).
 - Productionize the cross-app bus: stand up the dedicated shared Firebase project and integrate
   Pulse's agent end-to-end (today Rally implements the full contract and the bus falls back to
   Rally's own DB).
-- Evals harness for recognition detection (precision/recall on a labeled set) and an LLM-judge
-  for brief/summary quality (see `EVALS.md`).
+- An LLM-judge for brief/summary quality and an A/B harness (see `EVALS.md`). The recognition-
+  detection precision/recall/F1 eval is already shipped (`npm run test:evals`, runs in CI).
 - Recognition analytics for organizers (aggregate, still no public shame).
 
 **Later**

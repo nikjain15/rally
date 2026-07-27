@@ -8,9 +8,9 @@ gaps. Scores are self-assessed against a bar-raiser lens; the "gap" column is de
 | # | Dimension | Score | Evidence (file refs) | Gap |
 |---|---|---|---|---|
 | 1 | Model choice (LLM vs ML vs hybrid) | 4/5 | Deliberate hybrid: deterministic core (`lib/detect.ts`, `lib/brief.ts`) with an LLM layer on top (`lib/detect-model.ts`, `lib/assistant-run.ts`). LLM chosen for free-text understanding; regex/ranking chosen for the parts that must never fail. Model tiers set per task (`lib/agent.ts` `MODELS`). | No learned ML model (e.g. a classifier trained on cohort data); the "ML" side is rules, not a trained model. Model-vs-baseline win not yet measured (see EVALS layer 4). |
-| 2 | How the AI works (context, grounding) | 4/5 | Assistant grounds in what the caller could already read (channels, commitments, memory) via SAFE tools; system prompt injects private + shared memory (`lib/assistant-run.ts`). Detection prompt is tightly scoped and its output schema-validated (`extractJson`). **Temperature is now set explicitly as a risk dial** — 0 for the grounded classify/extract paths, 0.3 for the assistant and Ask summary (`lib/agent.ts`, `lib/detect-model.ts`, `app/api/ask/route.ts`, `lib/assistant-run.ts`). | Token budgets are still hand-picked defaults; retrieval ranking now exists for Ask/summary (see #6). |
-| 3 | Tools / MCP (schemas, validation, errors) | 4/5 | Typed Anthropic tool schemas (`ASSISTANT_TOOLS`), safe/propose split (`SAFE_TOOLS`/`PROPOSE_TOOLS`), `toProposal` validates every tool input, unknown tools handled, loop bounded to 5 steps. Errors degrade to `available:false` not a crash. | Not MCP-standard tools; no per-tool timeout/retry; tool errors collapse to a generic message. |
-| 4 | Agents & skills | 4/5 | A real bounded tool-use agent on Home (`lib/assistant-run.ts`) plus an inbox agent that claims cross-app tasks and runs them through the same assistant (`app/api/assistant/inbox`). Clear capability boundary (read/draft only). | Single-agent depth; no multi-agent planning or long-horizon memory beyond notes. |
+| 2 | How the AI works (context, grounding) | 4/5 | Assistant grounds in what the caller could already read (channels, commitments, memory) via SAFE tools; system prompt injects private + shared memory (`lib/assistant-run.ts`). Detection prompt is tightly scoped and its output schema-validated (`extractJson`). **The sampling contract is explicit** (`supportsSampling`): the reasoning tiers (`claude-sonnet-5`, `claude-opus-4-8`) reject sampling params, so `temperature` is omitted for the assistant, the Ask summary, and the Opus detect-escalate, and faithfulness is enforced by the grounded prompt; only the cheap `claude-haiku-4-5` detection pass is pinned to `temperature: 0` (`lib/agent.ts`, `lib/detect-model.ts`, `app/api/ask/route.ts`). | Token budgets are still hand-picked defaults; retrieval ranking now exists for Ask/summary (see #6). |
+| 3 | Tools / MCP (schemas, validation, errors) | 4/5 | Typed tool schemas (`ASSISTANT_TOOLS`), safe/propose split (`SAFE_TOOLS`/`PROPOSE_TOOLS`), `toProposal` validates every tool input, unknown tools handled, agent loop bounded to `MAX_AGENT_STEPS = 6` with per-call schema validation. **A real read-only MCP surface now ships** (`lib/mcp/`, on the vendored `@conduit/mcp`): two typed, JSON-Schema-validated tools (`search_channel`, `get_recognitions`), invalid args return a structured `invalid_arguments`, unknown tool returns `unknown_tool`, and the registry never throws for expected failures. Errors degrade to `available:false` not a crash. | No per-tool timeout/retry; in-loop tool errors collapse to a generic observation; the MCP transport wrappers depend on `@modelcontextprotocol/sdk` at call time (dynamic import, shimmed types). |
+| 4 | Agents & skills | 4/5 | A genuine bounded reason-act agent on Home built on the vendored `@conduit/agent` `runAgent` (`lib/assistant-agent.ts`, wired via `lib/assistant-run.ts`): step cap, one-JSON-object-per-step protocol, three runtime-loaded intent-selected **skills** (`catch-up-summary`, `recognition-draft`, `ask-answer`), and read-only tools. No-authority invariant enforced structurally: `allowSideEffects: false`, the `remember` write tool excluded from the loop, no points-writing/side-effecting tool. Plus an inbox agent that claims cross-app tasks and runs them through the same assistant (`app/api/assistant/inbox`). | Single-agent depth; no multi-agent planning or long-horizon memory beyond notes. |
 | 5 | Orchestration & routing (multi-model, cost) | 3/5 | Cost-aware cascade, wired end to end on the bulk detection path: the low-stakes extract runs on the **cheap** `claude-haiku-4-5` tier (`detectRecognitionsSmart`), `sonnet-5` is the interactive default for the assistant and Ask, and a below-`CONFIDENCE_THRESHOLD` candidate auto-escalates that one message once to the `claude-opus-4-8` `escalate` tier (`lib/agent.ts` `MODELS`, `lib/detect-model.ts`). **Per-call token + estimated-USD telemetry** is recorded for every model call, keyed by feature (`recordUsage`/`usageTotals`, `MODEL_PRICING`), unit-tested in `tests/unit/telemetry.test.ts`. | Escalation is a single bounded retry, not a multi-step budget planner; no hard budget cap enforced in code. |
 | 6 | RAG & context (retrieval, failure modes) | 3/5 | Context is assembled from Firestore (membership-scoped reads, personal unread bookmarks, private + shared memory merged in `runAssistant`). **Ask and channel-summary now RETRIEVE, not just recency-stuff**: a BM25 ranker (`lib/retrieval.ts`) scores a broad candidate pool against the question and windows the top matches (`app/api/ask/route.ts`, `summarize_channel`). **Both RAG failure modes are handled**: unfaithful-answer via the "answer only from transcript" prompt, and bad-retrieval via an explicit abstention — when nothing scores, Ask returns "couldn't find anything about that" instead of guessing. Failure modes stay first-class: missing key -> null, bus hiccup -> best-effort, model failure -> deterministic fallback. | Keyword BM25, not embeddings/vector search; candidate pool is still a bounded recent window (300), so retrieval is exact within it but not over full history at workspace scale. |
 | 7 | Evals & grounding | 3/5 | ~200 tests across unit/evals/rules/integration/e2e; the rules suite *is* an anti-gaming eval; adversarial "break it" integration pass; documented perf pass. Untrusted model output schema-validated before trust. **A precision/recall/F1 detection eval is now implemented** (`npm run test:evals`) against a committed 50-case labeled set, proving the "model never worse than baseline" contract (baseline F1 0.87). | LLM-judge (brief/assistant faithfulness) and A/B remain roadmap (designed in `EVALS.md`); detection dataset is 50 cases, not yet embeddings-scale. |
@@ -25,9 +25,21 @@ formal eval harness, dynamic/cost-aware routing, and scale beyond a single cohor
 
 ## Model and orchestration details
 
-- **Single wrapper** (`lib/agent.ts`): `callClaude` returns `string | null`, missing
-  `ANTHROPIC_API_KEY` or any exception (rate limit, timeout, bad key, malformed response) all
-  collapse to `null`, so callers have exactly one degradation path.
+- **Single wrapper** (`lib/agent.ts`): `callClaudeDetailed`/`callClaude` return the metered result
+  or `null`, missing `ANTHROPIC_API_KEY` or any exception (rate limit, timeout, bad key, malformed
+  response) all collapse to `null`, so callers have exactly one degradation path.
+- **One Conduit seam** (`lib/conduit/rally-client.ts`): detection, the Ask summary, and the
+  assistant call the wrapper through an embedded `@conduit/client` core (`inferViaConduit`,
+  `runAgentViaConduit`), which wraps Rally's own model call and BM25 retrieval, so the answers flow
+  through a unified interface with no network hop and unchanged cost accounting. An env-gated
+  reporter (`lib/conduit/reporter.ts`) mirrors each metered decision to a Conduit gateway when
+  `CONDUIT_GATEWAY_URL`/`CONDUIT_GATEWAY_TOKEN` are set (a NO-OP otherwise, pre-caught, non-blocking).
+  Conduit's `evaluate` surface is **not enabled** in embedded mode (a stub that throws); only
+  `infer`, `retrieve`, and `runAgent` are used.
+- **Sampling contract** (`supportsSampling`): the reasoning tiers (`claude-sonnet-5`,
+  `claude-opus-4-8`, ...) reject sampling params with a 400, so `temperature` is omitted for them and
+  determinism comes from the grounded prompt; only `claude-haiku-4-5` is sent `temperature: 0`. The
+  valid Haiku id is `claude-haiku-4-5` (there is no `claude-haiku-5`).
 - **Model tiers** (`MODELS`): a cost-aware cascade wired on the bulk detection path
   (`detectRecognitionsSmart`). The cheap `claude-haiku-4-5` tier runs the bulk, low-stakes
   recognition extract; `claude-sonnet-5` is the interactive default for the assistant and Ask; and
@@ -38,8 +50,10 @@ formal eval harness, dynamic/cost-aware routing, and scale beyond a single cohor
   runs a type guard before the value is used. Detection additionally drops unknown `kind`s and
   normalizes handles. The model reads attacker-controllable message text, so its output is never
   trusted structurally.
-- **Bounded agent loop:** `MAX_STEPS = 5`; safe tools execute server-side, propose tools return
-  typed `Proposal`s and never execute.
+- **Bounded agent loop:** the Home assistant is a reason-act loop on the vendored `@conduit/agent`
+  `runAgent` (`lib/assistant-agent.ts`), capped at `MAX_AGENT_STEPS = 6`; safe tools execute
+  server-side, propose tools return typed `Proposal`s and never execute, and the loop runs with
+  `allowSideEffects: false` (the `remember` write tool is excluded) so no side-effecting tool can run.
 
 ## Guardrails, the anti-gaming spine (verified)
 
@@ -59,7 +73,9 @@ formal eval harness, dynamic/cost-aware routing, and scale beyond a single cohor
    full order never returned), no inactivity shaming, no penalty for a missed commitment, personal
    unread state never broadcast.
 7. **The model has no authority.** Structurally: there is no tool in the assistant that awards,
-   posts, or confirms; a drafted recognition still needs peer confirmation.
+   posts, or confirms, the loop runs `allowSideEffects: false`, and the read-only MCP surface
+   (`lib/mcp/`) exposes no write tool and refuses an unbound identity; a drafted recognition still
+   needs peer confirmation.
 
 ## Cost notes
 

@@ -30,10 +30,11 @@ nothing** if the model or GitHub is unavailable, so the core always works:
   confirm it → only then does the helper earn points. It rewards generosity, not who talks the most.
 - **Commitments you keep.** "Track it" turns a promise ("I'll open the PR by Friday") into a GitHub
   issue; closing the issue marks the commitment kept and posts the status back to the thread.
-- **A Rally assistant on Home.** A chat panel backed by a Claude tool-use loop with **persistent
-  memory**. It reads your situation (catch-me-up, summarize a channel, list your commitments, find a
-  teammate) and **drafts actions you confirm with one tap:** it never acts on its own, and it can
-  never award points itself (a drafted recognition still gets peer-confirmed).
+- **A Rally assistant on Home.** A chat panel backed by a **bounded reason-act agent** (on the
+  vendored `@conduit/agent` loop) with **persistent memory** and intent-selected skills. It reads
+  your situation (catch-me-up, summarize a channel, list your commitments, find a teammate) with
+  **read-only** tools and **drafts actions you confirm with one tap:** it never acts on its own, and
+  it can never award points itself (a drafted recognition still gets peer-confirmed).
 - **Quiet intelligences.** A "Catch me up" brief, an "Ask Rally" channel Q&A, and
   recognition/commitment detection. The word "AI" never appears in the UI, it's just *Rally*.
 
@@ -59,9 +60,19 @@ of this loop and can drive any part of it for you (with your confirmation).
 - **Next.js 16 (App Router) + React 19 + TypeScript + Tailwind v4.** Firestore is the realtime bus
   (`onSnapshot`, no custom websockets), Firebase Auth (GitHub) is identity, `firebase-admin` backs
   the server routes, and `@anthropic-ai/sdk` runs **server-side only**.
+- **One metered model seam.** Detection, the Ask channel summary, and the assistant all run through
+  an embedded `@conduit/client` core (`lib/conduit/`, vendored), so they share one tier-routed,
+  metered interface. A cost cascade routes bulk recognition detection to cheap `claude-haiku-4-5`
+  and auto-escalates a low-confidence message once to `claude-opus-4-8`; an env-gated reporter can
+  mirror each metered decision to a Conduit gateway. Conduit's `evaluate` surface is a stub, not
+  wired in Rally.
+- **A read-only MCP server** (`lib/mcp/`, on the vendored `@conduit/mcp`): two typed, validated,
+  identity-bound tools (`search_channel`, `get_recognitions`) and no write tool. See
+  [docs/MCP.md](docs/MCP.md).
 - **The model has no authority.** It classifies, summarizes, and drafts; it never writes a
   points-bearing row. Every intelligence, including the assistant, has a deterministic fallback,
-  so Rally works fully with the model switched off.
+  so Rally works fully with the model switched off. The assistant loop runs read-only, with
+  `allowSideEffects: false` and no points-writing tool.
 - **Ledger, not counters.** Points/rank derive from the append-only `xpEvents` collection, written
   only by trusted server routes; rank is computed (query + reduce), never a stored total.
 - **Security lives in `firestore.rules`.** Channel-membership isolation, authorship binding, and
@@ -128,6 +139,7 @@ Deeper product and engineering write-ups live in [`docs/`](docs/):
 - [PRD.md](docs/PRD.md), personas, jobs-to-be-done, success metrics, tradeoffs, and the Now/Next/Later roadmap.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md), system overview with diagrams, including the peer-confirmed trust-ledger data flow, grounded in code paths.
 - [EVALS.md](docs/EVALS.md), the eval strategy (unit -> rules/anti-gaming -> e2e -> LLM-judge/A-B), named metrics, and what's implemented vs. roadmap.
+- [MCP.md](docs/MCP.md), the read-only MCP surface: the two tools, the identity/membership authorization model, and stdio + hosted (SSE) transports.
 - [TECHNICAL_NOTES.md](docs/TECHNICAL_NOTES.md), the 12-point technical scorecard with file-level evidence, model/orchestration details, guardrails, and cost notes.
 - [FDE_JOURNEY.md](docs/FDE_JOURNEY.md), how Rally deploys into a live environment: integrations, secrets, rollout/cutover, observability, de-risking.
 - [SHARED-CONTEXT.md](docs/SHARED-CONTEXT.md), the cross-app context-bus and agent-to-agent dispatch **mechanism** — Rally-side complete and a designed contract for a second app; today it runs single-app, transparently falling back to Rally's own database until a shared project and a second app exist.
