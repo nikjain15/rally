@@ -12,7 +12,7 @@ implemented vs. roadmap. Nothing here is fabricated, implemented items point at 
 | Intelligence | Failure that matters | Why it is contained |
 |---|---|---|
 | Recognition detection | false positive (credits the wrong person) or false negative (misses a thank-you) | A detection is only a *suggestion*; the helped peer must confirm before any points, so a bad inference costs nothing |
-| Brief ("catch me up") | invents urgency, or buries a real claim | Deterministic ranking is the baseline; the model only reclassifies free-text unread |
+| Brief ("catch me up") | invents urgency, or buries a real claim | Ranking is fully deterministic (`buildBrief`); it surfaces only real claims (a pending confirm, a due commitment, the busiest unread) and never calls a model, so it cannot invent urgency |
 | Home assistant | drafts a wrong action, or tries to act on its own | Propose-tools never execute; the user confirms; the model has no awarding tool |
 
 Because the guardrail (not the model) is what protects users, **the rules tests are Rally's most
