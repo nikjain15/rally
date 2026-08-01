@@ -92,11 +92,18 @@ fallback, so Rally runs fully with the model switched off.
 
 Because the guardrail, not the model, is what protects users, the anti-gaming rules tests are Rally's
 most important evals. On top of that, a **detection eval harness** scores recognition detection against
-a committed **50-case labeled set** (`tests/evals/data/recognition.labeled.jsonl`) and reports named
-metrics: **precision ~0.83 / recall ~0.92 / F1 ~0.87**, plus the false-positive rate tracked on its
-own. The harness also asserts the model layer is **never worse** than the deterministic baseline on F1
-and adds **no** false positives. A/B testing and an LLM-judge are honestly **roadmap**. See
-[docs/EVALS.md](docs/EVALS.md).
+a committed **50-case synthetic labeled set** (`tests/evals/data/recognition.labeled.jsonl`, hand-written
+to cover named difficulty bands; provenance in [docs/EVALS.md](docs/EVALS.md)) and reports named
+metrics for the **deterministic baseline**: **precision 0.83 / recall 0.92 / F1 0.87**, plus a
+**false-positive rate of 0.14** tracked on its own. Those four numbers are measured on every run and
+are the real result here.
+
+The harness also carries a regression assertion that the model layer is never worse than the baseline
+on F1 and adds no false positives. Read it as a **guard, not a measurement**: with `ANTHROPIC_API_KEY`
+absent, as in CI, the model layer falls back to the baseline, so that assertion compares the baseline
+to itself and passes by construction. **The model layer has not yet been scored against the baseline.**
+Next step: publish one eval run with a live key so the model-vs-baseline delta is a measured number.
+A/B testing and an LLM-judge are **roadmap**. See [docs/EVALS.md](docs/EVALS.md).
 
 ## Architecture
 
@@ -135,8 +142,10 @@ npm run test:e2e       # signed-in browser e2e against the emulator
 
 - **unit (130):** pure logic: detection, brief ranking, points, rate-limit, unread, @mention parsing,
   search, commitment nudges, assistant tool routing, model-output parsing, cost telemetry, BM25 retrieval.
-- **evals (7):** recognition-detection precision/recall/F1 against the committed 50-case labeled set,
-  asserting the model layer is never worse than the deterministic baseline (`npm run test:evals`).
+- **evals (7):** recognition-detection precision/recall/F1 for the deterministic baseline against the
+  committed 50-case synthetic labeled set (`npm run test:evals`), plus a regression guard that the
+  model layer never drops below the baseline. In CI there is no model key, so the model layer falls
+  back to the baseline and that guard passes by construction rather than measuring anything.
 - **rules:** the anti-gaming / membership / privacy guarantees (the load-bearing tests).
 - **integration:** the real client SDK + rules + realtime on the emulator, including an adversarial
   "break it" pass, assistant memory persistence, and a cohort-scale perf pass (~65 users / ~2,100

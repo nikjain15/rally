@@ -33,28 +33,56 @@ Two layers, both fail-closed:
   identity is a member of the channel; `get_recognitions` is scoped to the
   identity as helper or helped peer.
 
-For a hosted deployment, the transport additionally gates on a shared bearer
-token (`authorizeBearer` against `MCP_AUTH_TOKEN`), closed by default when no
-token is configured.
+The bearer-token check a hosted deployment would sit behind is written and unit
+tested today: `authorizeBearer` compares against `MCP_AUTH_TOKEN` and is closed
+by default when no token is configured (`lib/mcp/rally-server.ts`,
+`tests/unit/conduit-mcp.test.ts`). No hosted deployment currently calls it; see
+the roadmap section below.
 
-## Running locally (stdio)
+## Running it: stdio is the only runnable transport today
 
 ```bash
-# Requires @modelcontextprotocol/sdk and tsx installed (optional, dev-only).
+# One-time: npm i -D @modelcontextprotocol/sdk tsx
 RALLY_MCP_UID=<verified-rally-uid> npm run mcp:stdio
 ```
+
+This is the entry a local client (Claude Desktop, the MCP inspector) attaches
+to, and it is the only transport you can run against Rally right now.
+
+`@modelcontextprotocol/sdk` is **not** currently a dependency in
+`package.json`. The transport wrappers import it dynamically at call time, and
+they typecheck offline only because `lib/conduit/mcp/sdk-shim.d.ts` declares a
+narrow ambient subset of its API. Install the real SDK (and `tsx`) before
+running `npm run mcp:stdio`, or the dynamic import fails at startup. The pure
+tool and registry logic underneath is exercised by the unit tests without the
+SDK.
 
 With `RALLY_MCP_UID` unset an unbound reader is served, so every tool returns an
 auth error. The local OS process boundary is the trust boundary for stdio, so no
 bearer token is required there.
 
-## Hosted (HTTP/SSE)
+## Roadmap: hosted HTTP/SSE (not deployed, not routed)
 
-The vendored transport (`lib/conduit/mcp/http.ts`) exposes an SSE pair:
+**Status: not shipped.** There is no `/sse` or `/messages` route anywhere in
+`app/`, and nothing in the app imports the HTTP transport. Everything in this
+section describes the intended shape, not behaviour you can hit today.
 
-- `GET  https://<host>/sse` opens the event stream.
-- `POST https://<host>/messages?sessionId=<id>` carries client messages back.
+The vendored transport module `lib/conduit/mcp/http.ts` is written against the
+SDK's SSE pair and is the starting point:
 
-Front it with `authorizeBearer(req.headers.authorization, process.env.MCP_AUTH_TOKEN)`
-and bind `liveReader(verifiedUid)` per session, deriving the uid from the caller's
-verified Firebase identity exactly as the app's routes do.
+- a long-lived `GET` would open the event stream;
+- a `POST` carrying `sessionId` would return client messages, correlated by the
+  session map the module already keeps.
+
+To make it real, three things are needed:
+
+1. Add `@modelcontextprotocol/sdk` to `package.json` dependencies, so the
+   dynamic import in `lib/conduit/mcp/http.ts` resolves and the `sdk-shim.d.ts`
+   fallback stops being load-bearing.
+2. Create the two route handlers, for example
+   `app/api/mcp/sse/route.ts` and `app/api/mcp/messages/route.ts`, delegating to
+   `createSseHandler`.
+3. Front them with
+   `authorizeBearer(req.headers.authorization, process.env.MCP_AUTH_TOKEN)` and
+   bind `liveReader(verifiedUid)` per session, deriving the uid from the
+   caller's verified Firebase identity exactly as the app's routes do.

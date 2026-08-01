@@ -209,6 +209,12 @@ export interface ProfileRouting {
   main: string;
   backup?: string;
   capUsd?: number;
+  /**
+   * RESERVED, NOT IMPLEMENTED. Declared to keep this interface structurally
+   * matching `@conduit/profile`'s `UseCaseProfile`. Nothing in this repo reads
+   * or honours it: setting it true enables no caching anywhere. Do not treat
+   * its presence as evidence that response caching exists.
+   */
   cache?: boolean;
 }
 
@@ -237,6 +243,14 @@ export interface ProfileGuardrails {
   pii?: boolean;
   /** On a PII hit: mask the matches ("redact") or refuse ("block"). */
   piiAction?: "redact" | "block";
+  /**
+   * RESERVED, NOT IMPLEMENTED. Declared to keep this interface structurally
+   * matching `@conduit/profile`'s `UseCaseProfile`. No prompt-injection
+   * detection runs in this repo: setting it true guards nothing. Rally's actual
+   * protection against untrusted model output is structural, the model holds no
+   * awarding or posting tool, and output is schema-validated before it is
+   * trusted. Do not treat this field as evidence of an injection filter.
+   */
   injectionGuard?: boolean;
   outputSchema?: unknown;
   hitlThreshold?: number;

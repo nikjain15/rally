@@ -59,7 +59,7 @@ the assistant panel. This validates the confirm-before-act loop end-to-end from 
 ## Layer 4, model evals
 
 - **Recognition-detection precision/recall/F1 (IMPLEMENTED).** `npm run test:evals` runs
-  `tests/evals/detection.test.ts` against a committed labeled JSONL set
+  `tests/evals/detection.test.ts` against a committed, synthetic labeled JSONL set
   (`tests/evals/data/recognition.labeled.jsonl`, 50 cases: varied gratitude phrasings and
   multi-mention positives; self-credit, sarcasm, "thanks in advance", requests, and no-mention
   negatives; plus keyword-free gratitude to stress recall). The scorer (`lib/eval-detect.ts`) is
@@ -71,6 +71,28 @@ the assistant panel. This validates the confirm-before-act loop end-to-end from 
   **never worse** than the baseline on F1 and adds **no** false positives. With `ANTHROPIC_API_KEY`
   absent (as in CI) the model layer falls back to the baseline, so the contract holds by
   construction; with a key present the same test genuinely measures whether the model beats regex.
+  Publishing one run with a live key is the next step, and until then the model-vs-baseline delta is
+  unmeasured.
+
+### Provenance of the labeled set
+
+**The 50 cases are synthetic and hand-written, not sampled from production usage.** Every handle is
+an invented placeholder (`@alice`, `@bob`, `@carol`, `@tina`, and so on down the alphabet); no real
+member, message, or channel appears in the file.
+
+The set was authored to cover named difficulty bands, and the file is sectioned by them so coverage
+is auditable at a glance: clean single-mention positives, multi-mention positives sharing one verb,
+dedupe (same helper mentioned twice yields one recognition), clean negatives with no mention, clean
+negatives with a mention but no credit, self-credit negatives, hard negatives (thanks-in-advance,
+requests, sarcasm), and hard positives that express gratitude with no keyword verb to stress recall.
+
+What that buys is real: the bands are exactly the failure modes the detector is designed around, so
+a regression in any one of them turns the suite red, and the false-positive guards are explicit
+rather than incidental. What it does not buy is distributional realism. Hand-written cases cannot
+tell you how often each band actually occurs, and they miss the phrasings nobody thought to invent.
+
+Next step: fold in real pilot messages, sampled from the 65-person cohort and labeled by hand, so
+the set reflects observed phrasing frequency alongside the designed bands.
 - **Brief quality via LLM-judge (ROADMAP).** Given a synthetic inbox, judge the brief on: did it surface
   every real claim, invent zero urgency, and stay within three items. Scored by a judge model
   with a rubric; report pass rate and the invented-urgency rate (must be ~0).
