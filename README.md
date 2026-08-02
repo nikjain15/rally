@@ -182,6 +182,12 @@ Deeper product and engineering write-ups live in [`docs/`](docs/):
 - [MCP.md](docs/MCP.md): the read-only MCP surface: the two tools, the identity/membership authorization model, and stdio + hosted (SSE) transports.
 - [TECHNICAL_NOTES.md](docs/TECHNICAL_NOTES.md): model/orchestration details, guardrails, and cost notes with file-level evidence.
 - [FDE_JOURNEY.md](docs/FDE_JOURNEY.md): how Rally deploys into a live environment: integrations, secrets, rollout/cutover, observability, de-risking.
+- [STAKEHOLDERS.md](docs/STAKEHOLDERS.md): three **simulated** stakeholder reviews (design,
+  architecture, evals) run by the solo author against this code. 25 open findings ranked P0/P1/P2,
+  each quoting a file and line. No external party has reviewed or approved anything, and the doc
+  says so at the top.
+- [DECISION_LOG.md](docs/DECISION_LOG.md): assumptions in force, decisions changed or defended,
+  scope cuts, and the honest statement that no kill criteria have been set.
 - [SHARED-CONTEXT.md](docs/SHARED-CONTEXT.md): the cross-app context-bus and agent-to-agent dispatch **mechanism**, Rally-side complete and a designed contract for a second app; today it runs single-app, transparently falling back to Rally's own database until a shared project and a second app exist.
 
 ## License

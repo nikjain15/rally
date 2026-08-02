@@ -229,9 +229,10 @@ schema-validated tools: `search_channel` (BM25 over one channel's messages) and 
 Rally uid**; with no verified identity bound the reader is `authorized: false` and every tool
 returns an auth error touching no data. The surface exposes **no write tool**, it cannot post,
 suggest, confirm, or award, so it inherits Rally's authority model with even less power than a
-signed-in user. `lib/mcp/stdio-entry.ts` is the stdio entry; a hosted deployment fronts the SSE
-transport (`GET /sse`, `POST /messages?sessionId=<id>`) with a shared bearer token. See
-`docs/MCP.md` for the tool schemas and the hosted URL shape.
+signed-in user. `lib/mcp/stdio-entry.ts` is the stdio entry, and stdio is the only transport that ships. A hosted
+SSE transport is **roadmap, not deployed**: no `/sse` or `/messages` route exists anywhere in
+`app/`, and nothing imports the HTTP transport module. See `docs/MCP.md` for the tool schemas and
+for exactly what a hosted deployment would still need.
 
 ## Commitments -> GitHub issues -> kept
 
