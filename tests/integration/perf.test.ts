@@ -8,7 +8,11 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminDb } from '@/lib/admin';
 import { gatherBriefInput } from '@/lib/brief-admin';
-import { computeLeaderboard } from '@/lib/leaderboard-admin';
+import {
+  computeLeaderboard,
+  LEADERBOARD_BUDGET_LEDGER_EVENTS,
+  LEADERBOARD_P95_BUDGET_MS,
+} from '@/lib/leaderboard-admin';
 import { clearFirestore } from './helpers';
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
 
@@ -86,6 +90,12 @@ async function timed<T>(fn: () => Promise<T>): Promise<[T, number]> {
   return [out, Date.now() - start];
 }
 
+/** Nearest-rank p95 over a sorted sample. A single timing is weather; p95 is the budget. */
+function p95(samples: number[]): number {
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(0.95 * sorted.length) - 1)];
+}
+
 describe('cohort-scale performance (synthetic data)', () => {
   it('loads the open channel (latest 200 messages) quickly', async () => {
     const [snap, ms] = await timed(() =>
@@ -110,4 +120,68 @@ describe('cohort-scale performance (synthetic data)', () => {
     expect(board.neighbors.length).toBeLessThanOrEqual(5);
     expect(ms).toBeLessThan(3000);
   });
+});
+
+/**
+ * The stated p95 budget for the full-ledger scan (finding GEN1).
+ *
+ * DL-2 defended the scan and AS-3 admitted it is O(all events ever), but neither wrote a number
+ * down, which made the admission unfalsifiable: no run could violate it. This block is the
+ * enforcer. It grows the ledger to LEADERBOARD_BUDGET_LEDGER_EVENTS, the size the budget is
+ * claimed to hold at, and measures p95 across repeated calls rather than trusting one timing.
+ *
+ * Deliberately measured at the CLAIMED ceiling, not at today's 195 events. A budget verified only
+ * at the scale that hides the problem is the exact failure AS-3 names, and re-running it there
+ * would be theatre.
+ */
+describe('leaderboard p95 budget at the claimed ledger ceiling', () => {
+  const RUNS = 12;
+
+  beforeAll(async () => {
+    const existing = (await db.collection('xpEvents').count().get()).data().count;
+    let batch = db.batch();
+    let ops = 0;
+    for (let i = existing; i < LEADERBOARD_BUDGET_LEDGER_EVENTS; i++) {
+      batch.set(db.collection('xpEvents').doc(`budget_xp_${i}`), {
+        profileUid: uid(i % USERS), source: 'test', refId: `b${i}`, points: (i % 5) + 1,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      if (++ops >= 400) {
+        await batch.commit();
+        batch = db.batch();
+        ops = 0;
+      }
+    }
+    if (ops > 0) await batch.commit();
+  }, 300_000);
+
+  it(`holds p95 under ${LEADERBOARD_P95_BUDGET_MS}ms with ${LEADERBOARD_BUDGET_LEDGER_EVENTS} ledger events`, async () => {
+    const size = (await db.collection('xpEvents').count().get()).data().count;
+    expect(size).toBeGreaterThanOrEqual(LEADERBOARD_BUDGET_LEDGER_EVENTS);
+
+    const samples: number[] = [];
+    for (let i = 0; i < RUNS; i++) {
+      const [, ms] = await timed(() => computeLeaderboard(db, uid(30)));
+      samples.push(ms);
+    }
+    const worst = Math.max(...samples);
+    console.log(
+      `[perf] leaderboard over ${size} events, ${RUNS} runs: p95=${p95(samples)}ms max=${worst}ms budget=${LEADERBOARD_P95_BUDGET_MS}ms ` +
+        `(${((p95(samples) / size) * 1000).toFixed(3)}ms per 1k events)`,
+    );
+    // When this fails, the scan has outgrown its defence and the materialised rollup described in
+    // lib/leaderboard-admin.ts is the work. That is the whole purpose of putting a number here.
+    expect(p95(samples)).toBeLessThan(LEADERBOARD_P95_BUDGET_MS);
+  }, 180_000);
+
+  it('still returns the right answer at that scale, not just the right latency', async () => {
+    // A budget test that only timed things would pass on a scan that had quietly stopped summing.
+    const board = await computeLeaderboard(db, uid(30), { includeTop: true });
+    expect(board.participants).toBe(USERS);
+    expect(board.teamTotal).toBeGreaterThan(LEADERBOARD_BUDGET_LEDGER_EVENTS); // >=1 point per event
+    expect(board.me).not.toBeNull();
+    expect(board.leaders!.length).toBeLessThanOrEqual(5);
+    // The kindness rule still holds at scale: the full ordering never leaves the server.
+    expect(board.neighbors.length).toBeLessThanOrEqual(5);
+  }, 60_000);
 });

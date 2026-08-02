@@ -13,6 +13,16 @@ const nextConfig: NextConfig = {
   // it external loads it from node_modules with its dynamic imports intact. Local dev/emulator
   // never hit this because the emulator path skips jwks-rsa and dev doesn't bundle externals.
   serverExternalPackages: ["firebase-admin"],
+
+  // Rally renders zero `next/image` components (the one avatar in components/rally-nav.tsx is a
+  // plain <img> on a GitHub-hosted URL), so the Image Optimization endpoint at /_next/image is
+  // dead surface that ships anyway. It is also the ONLY path by which `sharp`, and therefore
+  // libvips, is ever loaded at runtime. sharp <0.35.0 carries GHSA-f88m-g3jw-g9cj (four inherited
+  // libvips CVEs) and next 16.2.x pins `sharp: ^0.34.5`, so the version cannot be fixed without
+  // forcing a dependency outside the range its parent declares. Turning optimization off removes
+  // the reachability instead of arguing about it: with `unoptimized`, /_next/image never decodes
+  // an image and sharp is never required. See security/audit-allowlist.json, entry `sharp`.
+  images: { unoptimized: true },
 };
 
 export default nextConfig;

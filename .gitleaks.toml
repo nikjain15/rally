@@ -1,0 +1,46 @@
+# Secret scanning for Rally (finding SH10).
+#
+# Rally's real secrets are all environment variables that never enter the repo: the Firebase
+# service-account JSON, ANTHROPIC_API_KEY, GITHUB_TOKEN and GITHUB_WEBHOOK_SECRET (see .env.example
+# and DEPLOY-RALLY.md). Nothing enforced that. `.gitignore` covers `.env*`, but .gitignore only
+# protects the files you remembered to name, and it does nothing at all about a key pasted into a
+# doc, a test fixture or a commit that was later reverted. This scan reads history, so a secret
+# that was committed and then deleted is still found.
+#
+# CI runs the full-history scan on push and a diff scan on pull requests.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "firebase-service-account-json"
+description = "Firebase/GCP service-account private key committed inline"
+# The service account is pasted into FIREBASE_SERVICE_ACCOUNT as one line of JSON, so the giveaway
+# is the private_key field rather than a PEM block on its own line.
+regex = '''"private_key"\s*:\s*"-----BEGIN[^"]*PRIVATE KEY'''
+tags = ["firebase", "gcp", "private-key"]
+
+[[rules]]
+id = "rally-env-assignment"
+description = "A Rally secret env var assigned a non-empty literal value"
+# Catches `ANTHROPIC_API_KEY=sk-ant-...` or `GITHUB_WEBHOOK_SECRET=hunter2` anywhere in the tree.
+# The empty assignments in .env.example do not match: a value is required.
+regex = '''(?i)\b(ANTHROPIC_API_KEY|GITHUB_TOKEN|GITHUB_WEBHOOK_SECRET|FIREBASE_SERVICE_ACCOUNT|SHARED_FIREBASE_SERVICE_ACCOUNT|RALLY_OPS_SECRET)\s*=\s*['"]?[A-Za-z0-9_\-\.\/\+]{12,}'''
+tags = ["rally", "env"]
+
+[allowlist]
+description = "Known-safe paths and placeholders"
+paths = [
+  # Committed compiled output of the vendored @cohort/core, byte-for-byte from source.
+  '''vendor/cohort-core/dist/.*''',
+  '''package-lock\.json''',
+]
+regexes = [
+  # Placeholder and emulator credentials. The Firebase emulator accepts any api key, and the test
+  # harness hardcodes these on purpose so the suite runs with no real project.
+  '''demo-key''',
+  '''emulator-pw-123''',
+  '''NEXT_PUBLIC_FIREBASE_API_KEY=\s*$''',
+  # `.env.example` documents variable NAMES with empty values. Names are not secrets.
+  '''(ANTHROPIC_API_KEY|GITHUB_TOKEN|GITHUB_WEBHOOK_SECRET|FIREBASE_SERVICE_ACCOUNT)=\s*(#.*)?$''',
+]

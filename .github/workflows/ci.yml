@@ -21,6 +21,43 @@ jobs:
       - run: npm run test:unit
       - run: npm run test:evals
 
+  # SH10. CI ran no dependency audit at all, so GitHub's advisory list and the repository were two
+  # different sources of truth and only one of them could block a merge. This job makes the audit a
+  # build step. It fails on high and critical, tolerates moderate and low, and every suppression in
+  # security/audit-allowlist.json carries a reason, a link and an EXPIRY DATE that fails the build
+  # once it passes. Runs as its own job so a security regression is legible in the checks list
+  # rather than buried at the end of the test job.
+  security:
+    name: dependency audit · secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks reads history: a secret that was committed and then deleted is still a secret.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # `npm audit` alone would fail on the first unfixable transitive advisory and stay red
+      # forever, which trains people to ignore it. scripts/audit-gate.mts is the difference: it
+      # gates on high/critical only, and it makes each exception a dated decision.
+      - name: npm audit gate (high/critical, expiring allowlist)
+        run: npm run audit:ci
+      # Rally's real secrets are all env vars (.env.example): the Firebase service account,
+      # ANTHROPIC_API_KEY, GITHUB_TOKEN, GITHUB_WEBHOOK_SECRET. .gitignore covers `.env*`, which
+      # protects only the files someone remembered to name and nothing about a key pasted into a
+      # doc or a fixture. Config and custom Rally rules live in .gitleaks.toml.
+      # Note: gitleaks-action is free for personal accounts and public repositories; an
+      # organisation-owned private repo would need GITLEAKS_LICENSE set as a secret.
+      - name: gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
   emulator:
     name: rules · integration (Firestore emulator)
     runs-on: ubuntu-latest

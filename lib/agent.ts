@@ -127,6 +127,51 @@ export function resetUsage(): void {
   USAGE_LOG.length = 0;
 }
 
+/**
+ * Why a logical model call ended the way it did (finding SH3).
+ *
+ * The cost meter above answers "what did we spend". It cannot answer "is it broken", because a
+ * degrade is invisible to it: when the ladder is exhausted the call returns null, the caller's
+ * deterministic baseline answers, the user sees something reasonable, and NO usage row is written.
+ * A silent, successful-looking degrade is exactly the failure Rally is most likely to ship, so it
+ * gets its own record.
+ *
+ *  - `ok`            the model answered.
+ *  - `no_key`        ANTHROPIC_API_KEY is absent. The model is switched OFF, which is a
+ *                    configuration state and deliberately NOT counted as a failure.
+ *  - `exhausted`     retries, backoff and timeouts all ran out, or the error was permanent.
+ *  - `invalid_output` the model answered with something that failed the type guard.
+ */
+export type OutcomeReason = 'ok' | 'no_key' | 'exhausted' | 'invalid_output';
+
+export type OutcomeRecord = { feature: string; model: string; reason: OutcomeReason; atMs: number };
+
+const OUTCOME_LOG: OutcomeRecord[] = [];
+const OUTCOME_LOG_MAX = 500;
+
+/** Record how one logical model call ended. Cheap enough to sit on every call path. */
+export function recordOutcome(feature: string, model: string, reason: OutcomeReason, atMs = Date.now()): OutcomeRecord {
+  const rec: OutcomeRecord = { feature, model, reason, atMs };
+  OUTCOME_LOG.push(rec);
+  if (OUTCOME_LOG.length > OUTCOME_LOG_MAX) OUTCOME_LOG.shift();
+  // Only the interesting ones are logged: an `ok` line per call would drown the signal, and
+  // `no_key` in local dev would print on every request for a state that is not a problem.
+  if (reason === 'exhausted' || reason === 'invalid_output') {
+    console.warn(`[degrade] feature=${feature} model=${model} reason=${reason}`);
+  }
+  return rec;
+}
+
+/** The most recent call outcomes (oldest first). Read by lib/slo.ts. */
+export function getRecentOutcomes(): readonly OutcomeRecord[] {
+  return OUTCOME_LOG;
+}
+
+/** Clear the outcome log. Test hook only. */
+export function resetOutcomes(): void {
+  OUTCOME_LOG.length = 0;
+}
+
 export function hasModel(): boolean {
   return !!process.env.ANTHROPIC_API_KEY;
 }
@@ -204,7 +249,10 @@ export async function callClaudeDetailed(opts: CallClaudeOpts): Promise<CallClau
   const key = process.env.ANTHROPIC_API_KEY;
   // No key: this is not a failure to retry, it is the model being switched off. Return before any
   // client is constructed, so with no key the provider is never contacted at all.
-  if (!key) return null;
+  if (!key) {
+    recordOutcome(opts.feature ?? opts.model, opts.model, 'no_key');
+    return null;
+  }
 
   const policy = resolveRetryPolicy(opts.retryProfile, opts.retryOverrides);
   const feature = opts.feature ?? opts.model;
@@ -241,6 +289,7 @@ export async function callClaudeDetailed(opts: CallClaudeOpts): Promise<CallClau
           if (res.usage) recordUsage(feature, opts.model, usage);
           const block = res.content.find((b) => b.type === 'text');
           const text = block && block.type === 'text' ? block.text : null;
+          recordOutcome(feature, opts.model, 'ok');
           return {
             text,
             model: opts.model,
@@ -262,6 +311,9 @@ export async function callClaudeDetailed(opts: CallClaudeOpts): Promise<CallClau
   } catch {
     // The ladder is exhausted (or the failure was permanent, e.g. a bad key or a bad request).
     // Same contract as always: degrade to null and let the caller's deterministic baseline answer.
+    // Recorded, because this is the degrade that no other signal in Rally makes visible: the
+    // caller's fallback answers, the request returns 200, and nothing else would ever say so.
+    recordOutcome(feature, opts.model, 'exhausted');
     return null;
   }
 }

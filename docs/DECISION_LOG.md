@@ -17,7 +17,9 @@ anywhere in the repo, which is finding A-P1-3 and is still open. When they are w
 should point at them rather than replace them.
 
 Last updated 2026-08-02 against commit `8bca84e`, then amended the same day to add DL-6, which
-supersedes DL-3 and closes finding D-P0-3.
+supersedes DL-3 and closes finding D-P0-3, and amended again the same day to add DL-7 through DL-11
+from a security and operations pass (findings SH1, SH3, SH8, SH9, SH10 and GEN1, recorded in
+[`STAKEHOLDERS.md`](STAKEHOLDERS.md#amendment-2026-08-02-security-and-operations-pass)).
 
 ---
 
@@ -30,10 +32,12 @@ turned out to be false. Listing them is the point: an assumption that is written
 |---|---|---|---|
 | AS-1 | Peer confirmation is enough to make recognition trustworthy | **False, and no longer relied on.** Confirmation alone stops self-award and client-minted points, both proven by `tests/rules/firestore.test.ts`, and it never stopped a cooperating pair (finding D-P0-3). Since DL-6 the economy no longer rests on confirmation alone: a per-pair rolling allowance bounds it | Already falsified for the pair case, which is why the guard exists. It would be falsified again by a ring of manufactured accounts, which nothing in Rally defends against. The absolute claim in `README.md` should still be narrowed |
 | AS-2 | Members will actually confirm the recognitions suggested to them | **Unverified.** Nothing in the app records the suggested-to-confirmed rate, though `docs/PRD.md` names it as a supporting metric | Measuring it. If the conversion is low, the north-star metric has no supply and the whole loop is decorative |
-| AS-3 | Cohort scale is representative enough to defer scaling work | **Holds today, will not hold later.** The full ledger scan in `lib/leaderboard-admin.ts` line 45 is O(all events ever) and the 16ms measurement was taken at exactly the scale that hides it | Any deployment past a few hundred active members, or a long-lived cohort where the ledger keeps growing |
+| AS-3 | Cohort scale is representative enough to defer scaling work | **Holds today, will not hold later, and is now measurable.** The full ledger scan in `lib/leaderboard-admin.ts` is still O(all events ever). Since DL-9 it carries `LEADERBOARD_P95_BUDGET_MS` and `LEADERBOARD_BUDGET_LEDGER_EVENTS`, and `tests/integration/perf.test.ts` measures p95 at that 20,000-event ceiling rather than at today's few hundred | The budget test going red, which is the first version of this assumption that can actually fail. Note it fails against a seeded emulator, so it catches an algorithmic regression, not a real-user percentile |
 | AS-4 | The model layer improves on the regex baseline | **Never measured.** With no API key the model falls back to the baseline, so the CI comparison compares the baseline to itself | One eval run with a live key. Until then, no claim in either direction is supported |
 | AS-5 | GitHub handle is a stable cross-app identity key | **Unverified and structurally untestable today.** A renamed GitHub handle silently splits a person's history, and with only one app on the bus nothing can detect it | A renamed handle, or a second app joining the bus |
-| AS-6 | Rate limiting bounds model spend | **Weak.** `lib/rate-guard.ts` line 13 is in-memory per warm instance, so the real ceiling is limit times instance count | Any traffic pattern that spins up many instances |
+| AS-6 | Rate limiting bounds model spend | **Weak, and now at least visible.** `lib/rate-guard.ts` line 13 is still in-memory per warm instance, so the real ceiling is limit times instance count. DL-10 adds a spend threshold (`model_spend_usd_per_hour`, 5) that reads the same per-instance meter and inherits the same limitation, so it detects a runaway loop on one instance and nothing about the fleet | Any traffic pattern that spins up many instances. A shared Firestore counter remains the fix for both the limit and the meter |
+| AS-9 | The retention windows in `lib/retention.ts` are set where the product stops needing the data | **Chosen, not measured**, exactly like the DL-6 constants. Nothing in Rally records how far back anyone scrolls, how old a read message is, or whether a 90-day assistant thread is ever referenced | Any usage data at all on read recency. Also falsified in the other direction by a legal or contractual requirement, since no counsel has read this (DL-7) |
+| AS-10 | The SLO thresholds in `lib/slo.ts` mark the point where Rally is broken | **Chosen, not calibrated.** Rally has never run under sustained load with a live key, so 0.20 degrade, 0.05 invalid output and $5/hour are derived from where Rally's own contract stops holding, not from observed distributions | The first week of real traffic with a key set. If any threshold fires routinely it was too tight; if a real incident passes under all three it was too loose (DL-10) |
 | AS-7 | Recognition points will not be read as a performance signal by an adopting org | **Untested.** True in a cohort of peers; entirely unknown once a manager is in the workspace | The first organisation where someone screenshots the leaderboard into a review |
 | AS-8 | The four screens are usable by keyboard and screen reader users | **No evidence either way.** Manual `aria-label` work exists; zero automated or assistive-technology verification (finding D-P1-4) | Running an accessibility check. Two specific defects are already provable from source: `components/onboarding.tsx` line 36 and `app/channels/page.tsx` line 454 |
 
@@ -41,7 +45,11 @@ turned out to be false. Listing them is the point: an assumption that is written
 
 ## Decisions these reviews changed
 
-One at review time, and one since. That is the honest count.
+One at review time, and one since, from the three simulated reviews. That is the honest count for
+them. DL-7 through DL-11 come from a separate security and operations pass on the same day and are
+kept in the same list so the reasoning sits together, but they should not be read as output of the
+role-play exercise. Their findings are recorded under
+[a clearly-marked amendment](STAKEHOLDERS.md#amendment-2026-08-02-security-and-operations-pass).
 
 ### DL-1 The hosted MCP transport claim is corrected
 
@@ -107,6 +115,167 @@ argument attached than without it.
   Verified with `tests/unit/recognition-economy.test.ts`, the new group in
   `tests/integration/recognition.test.ts`, and three added rules tests. Every new integration test
   was confirmed to fail with the cap removed.
+
+### DL-7 Retention is enforced code, and erasure keeps the ledger while losing the person
+
+Closes finding SH9.
+
+- **Decision:** windows per data type live in `lib/retention.ts` as data, and `sweepRetention`
+  enforces them. Messages and commitments 400 days, pulse events 180, assistant memory 180, assistant
+  thread messages 90, unresolved recognitions 30, `recognitionPairs` 7. `xpEvents` and `profiles` are
+  indefinite and say so. `eraseMember` deletes one member's identity, own content, reads, reactions,
+  commitments, quests, assistant data and every recognition that names them, from
+  `POST /api/me/erase`.
+
+- **The decision that actually needed making, and it is a tradeoff, not a fix:** what erasure does to
+  the append-only ledger. Three options were on the table.
+  1. **Delete the rows.** Cleanest privacy story, and it silently rewrites team totals and rank
+     history. Worse, it makes "delete rows from the ledger" a supported operation, and the system
+     cannot distinguish deleting rows to honour a request from deleting rows to flatter someone.
+     Rejected.
+  2. **Re-key to a hash of the uid.** Stable, tidy, and false: a hash over a known 65-person uid set
+     is reversible by enumerating it. Rejected, because it is pseudonymisation presented as
+     anonymisation, which is the exact class of overclaim this repository keeps trying to remove.
+  3. **Re-key to a fresh random tombstone**, generated at erasure time and stored in no lookup table.
+     Chosen. The arithmetic survives, the link to the person does not.
+
+- **The cost accepted, stated plainly:** the leaderboard keeps a participant nobody can name, and two
+  separately erased members are not linkable to each other but are both visible as ghosts. That is
+  asserted in `tests/integration/retention.test.ts` rather than left as prose, so it cannot quietly
+  stop being true.
+
+- **What deletion cannot reach, and why that is a decision too.** Other members' message bodies are
+  not rewritten. If Ana wrote "thanks @bob", that is Ana's sentence. Editing one member's words to
+  satisfy another member's request would corrupt the record while leaving the meaning perfectly
+  legible: strictly worse than both leaving it and deleting the whole message. Also unreachable:
+  Firebase backups and point-in-time recovery, Vercel logs, GitHub issues, and the cross-app bus. All
+  of it is returned in the API response on every erasure, not only written here.
+
+- **Rejected alongside:** a per-member "download my data" export. It is the natural companion and it
+  is a different piece of work with its own disclosure surface, and shipping a thin version of it
+  alongside this would have been the weaker half of two features rather than one done properly.
+
+- **Still open:** nothing schedules the sweep, so the policy is enforceable and not enforced. The
+  Firebase Auth user is not deleted (separate credential store, deliberately a separate decision).
+  The windows are chosen, not measured (AS-9). And no lawyer has read any of this, so none of it is a
+  compliance claim.
+
+- **Scope:** `lib/retention.ts`, `lib/ops-auth.ts`, `app/api/ops/retention/route.ts`,
+  `app/api/me/erase/route.ts`. Verified by `tests/unit/retention-policy.test.ts` and 17 emulator tests
+  in `tests/integration/retention.test.ts`.
+
+### DL-8 Suppressing an advisory requires a reason and an expiry date, and the expiry fails the build
+
+Closes finding SH10.
+
+- **Decision:** `npm audit` runs in CI through `scripts/audit-gate.mts`. It fails on high and
+  critical, reports moderate and low, and every exception lives in `security/audit-allowlist.json`
+  with a package, GHSA id, reason, link and **expiry date**.
+
+- **Why not plain `npm audit --audit-level=high`:** because it would fail on the first unfixable
+  transitive advisory and stay red forever, and a permanently red check is a check everyone learns to
+  ignore. That is a worse outcome than no check, because it looks like coverage.
+
+- **The load-bearing rule:** an entry past its expiry **fails the build even when the advisory it
+  covers has since been fixed**. That looks pedantic and it is the whole point. A suppression is a
+  promise to look again on a date; if nobody looked, the promise was not kept, and the build is the
+  only thing that will ever collect on it. Deleting the entry is a perfectly good resolution, but it
+  has to be a thing someone does, not a thing that decays. Also failed: an expiry more than 180 days
+  out, so nobody can write "expires 2099", and a reason under 40 characters, so nobody can write
+  "known".
+
+- **What decides severity here is reachability, not npm's label.** The triage table in
+  `STAKEHOLDERS.md` records the verdict per high. The one that mattered: `sharp` could not be
+  upgraded without forcing a 0.x major outside the range `next` declares, so instead
+  `next.config.ts` sets `images: { unoptimized: true }`, which switches off the only endpoint that
+  loads it. Turning an argued non-reachability into a structural one was worth more than the version
+  bump, and the version bump is flagged rather than applied.
+
+- **Scope:** `.github/workflows/ci.yml`, `scripts/audit-gate.mts`, `security/audit-allowlist.json`,
+  `.gitleaks.toml`, `next.config.ts`, `package.json`. Verified by 23 tests in
+  `tests/unit/audit-gate.test.ts`, one of which runs the committed allowlist against the real clock.
+
+### DL-9 The ledger scan gets a p95 budget rather than a rollup
+
+Narrows findings A-P0-1, A-P1-6 and GEN1. **This does not supersede DL-2; it is DL-2 with a number
+attached.**
+
+- **Decision:** `LEADERBOARD_P95_BUDGET_MS` (1500) and `LEADERBOARD_BUDGET_LEDGER_EVENTS` (20,000) in
+  `lib/leaderboard-admin.ts`, enforced by `tests/integration/perf.test.ts`, which grows the ledger to
+  that ceiling and measures p95 over repeated calls.
+
+- **Why not the rollup, given DL-2 already promised reconciliation first.** Because doing it properly
+  means writing a mutable per-member total from three transactions
+  (`lib/recognition-admin.ts`, `lib/commitment-admin.ts`, `lib/quest-admin.ts`), each of which
+  currently carries an anti-gaming invariant, plus the reconciliation job that proves the rollup still
+  equals the ledger. Without that job the rollup is a second source of truth for the number the
+  product's credibility rests on. Shipping the fast version and deferring the correctness check to
+  close a finding would trade a measured slow path for an unmeasured wrong one, which is the opposite
+  of what this audit is for.
+
+- **Why not a cache.** Per warm instance on a serverless deployment, so it flatters the p95 while
+  doing nothing for the cold call that is actually slow, and it puts a staleness window on a screen
+  whose appeal is that the number is live.
+
+- **What this genuinely buys, stated narrowly:** the defence in DL-2 can now fail. Before, AS-3 said
+  "this will not hold at scale" and nothing could ever contradict it. What it does **not** buy is an
+  answer to A-P1-6's actual question: this is a seeded emulator, so it catches an algorithmic
+  regression and says nothing about the 95th-percentile real user. No API route emits a duration.
+
+### DL-10 The threshold is defined and the alert is not, and the gap is stated rather than blurred
+
+Closes the measurement half of finding SH3.
+
+- **Decision:** three thresholds in `lib/slo.ts` (degrade rate 0.20, invalid-output rate 0.05, spend
+  $5/hour), each with its reasoning in place, computed at `GET /api/ops/slo` and reduced to one
+  unauthenticated boolean on `GET /api/health`.
+
+- **The choice worth recording is `no_key`.** An absent `ANTHROPIC_API_KEY` is the model switched
+  off, which is a configuration state, so it is excluded from every denominator. Counting it would
+  make local dev and CI, where there is never a key, look like a permanent outage, and a signal that
+  is always red is a signal nobody reads. The cost is that "somebody deleted the key in production"
+  does not trip the degrade rate; it shows as samples going to zero, which the runbook names as the
+  confirmation signal for rung 1.
+
+- **Why the invalid-output rate is separate and tighter.** It is a different diagnosis, not a stricter
+  version of the same one. A provider blip cannot make a model return well-formed prose that fails a
+  type guard; a prompt change, a model swap, or input reshaping the prompt can. Splitting them is
+  what lets the runbook say "if this one moved, look at the last deploy" instead of "something is
+  wrong somewhere".
+
+- **What is deliberately not claimed: this is not alerting.** No pager, no email, no webhook, nothing
+  polls it. `/api/ops/slo` returns its own `caveats` array saying so, so a reader cannot mistake a
+  number for an alarm. Calling a route that computes a boolean "monitoring" would be exactly the
+  overclaim `STAKEHOLDERS.md` exists to catch.
+
+- **Inherited limitation, not solved:** the meters are in-process ring buffers, so every number
+  describes one warm instance (AS-6, AS-10). A breach is real; a clean report proves nothing.
+
+### DL-11 Injection gets a case set, not a filter
+
+Closes the test half of finding SH1.
+
+- **Decision:** 13 injection cases in `tests/evals/data/recognition.labeled.jsonl` under a new
+  `injection` band, covering instruction override, role override and exfiltration, asserted
+  individually in `tests/evals/detection.test.ts` because an aggregate F1 cannot see 13 cases in 64.
+
+- **No input filtering was added, and that is the decision.** Screening message text for "ignore
+  previous instructions" is a defence an attacker rephrases around on the first attempt, and shipping
+  it would let Rally claim protection it does not have while adding a new way for a real message to be
+  silently mangled. The actual defence is structural and already existed: the model holds no
+  side-effecting tools, output is type-guarded and confidence-gated, and detection produces a
+  suggestion that the helped peer must confirm, capped per pair by DL-6. A fully successful injection
+  buys a suggestion. The band exists to keep that true, not to replace it.
+
+- **The weakness is asserted, not hidden.** A 14th case in an `injection-mixed` band shows the
+  deterministic baseline crediting a handle smuggled after a real thank-you, because it matches one
+  verb and every `@handle`. The test asserts that behaviour with the containment argument attached, so
+  if anyone later adds screening, that assertion is what fails and the design gets re-argued rather
+  than drifting.
+
+- **Still open:** 13 hand-written shapes prove those shapes are handled and nothing about shapes
+  nobody thought of. No injection coverage exists for the assistant or the Brief, which read the same
+  corpus. And with no key in CI the model half of the assertion holds by construction, per E-P1-3.
 
 ---
 

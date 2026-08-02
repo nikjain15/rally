@@ -16,6 +16,13 @@ export type LabeledCase = {
   text: string;
   /** The recognitions a correct detector should emit. Empty for true negatives. */
   expected: DetectedRecognition[];
+  /**
+   * Optional group label, so a slice of the set can be asserted on its own terms rather than only
+   * through an aggregate score. `injection` is the one that exists today: a handful of adversarial
+   * cases whose whole point is that the aggregate F1 would hide them, because twelve messages out
+   * of seventy-odd cannot move a precision figure enough to notice.
+   */
+  band?: string;
 };
 
 export type Counts = { tp: number; fp: number; fn: number };
@@ -99,10 +106,14 @@ export function parseLabeledJsonl(raw: string): LabeledCase[] {
       } catch {
         throw new Error(`eval dataset: line ${i + 1} is not valid JSON`);
       }
-      const o = obj as { text?: unknown; expected?: unknown };
+      const o = obj as { text?: unknown; expected?: unknown; band?: unknown };
       if (typeof o.text !== 'string' || !Array.isArray(o.expected)) {
         throw new Error(`eval dataset: line ${i + 1} missing text/expected`);
       }
-      return { text: o.text, expected: o.expected as DetectedRecognition[] };
+      return {
+        text: o.text,
+        expected: o.expected as DetectedRecognition[],
+        ...(typeof o.band === 'string' ? { band: o.band } : {}),
+      };
     });
 }

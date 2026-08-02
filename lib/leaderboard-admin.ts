@@ -29,6 +29,50 @@ export type LeaderboardResult = {
   participants: number;
 };
 
+/**
+ * The performance budget for `computeLeaderboard` (finding GEN1).
+ *
+ * `computeLeaderboard` reads the whole `xpEvents` collection on every call. DL-2 defended that and
+ * AS-3 admits it is O(all events ever), but neither of them wrote down a number, so the admission
+ * was unfalsifiable: there was nothing a run could violate. These two constants are that number,
+ * and `tests/integration/perf.test.ts` enforces them.
+ *
+ * Why a budget rather than a rollup or a cache, stated plainly, because "we chose the easy one" is
+ * the wrong reason and this is not it:
+ *
+ *  - A MATERIALISED ROLLUP means a mutable per-member total, written from `lib/recognition-admin.ts`,
+ *    `lib/commitment-admin.ts` and `lib/quest-admin.ts`. Each of those writes inside a transaction
+ *    that carries an anti-gaming invariant, and a stored total is exactly the thing Rally's design
+ *    refuses to have ("XP is summed from the append-only ledger, never a stored total"). Done
+ *    properly it also needs a reconciliation check proving the rollup still equals the ledger, or
+ *    it is a second source of truth that can silently disagree with the first. That is a real piece
+ *    of work with a real correctness surface, and doing it badly to close a finding would trade a
+ *    measured slow path for an unmeasured wrong one.
+ *  - A CACHE on a serverless deployment is per warm instance, so it would make the p95 look better
+ *    while doing nothing for the cold call that is actually slow, and it would put a staleness
+ *    window on a screen whose whole appeal is that the number is live.
+ *
+ * So: the scan stays, and it now has a stated ceiling that a test can fail. When the ledger passes
+ * `LEADERBOARD_BUDGET_LEDGER_EVENTS`, the rollup is the correct next piece of work and the failing
+ * test is what says so, on a date, rather than a paragraph nobody re-reads.
+ */
+export const LEADERBOARD_P95_BUDGET_MS = 1500;
+
+/**
+ * Measured 2026-08-02 on the Firestore emulator, 12 runs over a 20,000-event ledger:
+ * **p95 677ms, about 34ms per 1,000 events.** So the budget has roughly 2.2x headroom today, and on
+ * that slope it is reached somewhere near 44,000 events. Two things that reading cannot support: it
+ * is an emulator on one machine, not production, and it is the algorithm's cost, not a real user's
+ * latency (finding A-P1-6 is narrowed by this, not closed).
+ */
+
+/**
+ * The ledger size the budget above is claimed to hold at. Above this, nothing has been measured and
+ * no claim is being made. Set at roughly 20x the ledger a 65-person cohort accumulates in a year of
+ * heavy use, so it is a genuine headroom statement rather than a restatement of today.
+ */
+export const LEADERBOARD_BUDGET_LEDGER_EVENTS = 20_000;
+
 const NEIGHBOR_RADIUS = 2;
 
 /** How many leaders the opt-in "full board" reveals. Small — a podium, not the whole ladder. */

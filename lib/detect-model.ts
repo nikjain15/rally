@@ -1,4 +1,4 @@
-import { MODELS, extractJson, hasModel } from './agent';
+import { MODELS, extractJson, hasModel, recordOutcome } from './agent';
 import { inferViaConduit } from './conduit/rally-client';
 import { detectRecognitions, type DetectedRecognition } from './detect';
 
@@ -100,7 +100,13 @@ export async function detectRecognitionsSmart(body: string): Promise<DetectedRec
   });
 
   const parsed = extractJson(briefText, isDetections);
-  if (!parsed) return detectRecognitions(body); // fall back on absence / invalid output
+  if (!parsed) {
+    // A null here means the call already degraded (recorded in callClaudeDetailed) OR the model
+    // answered with something the type guard rejected. Only the second case is news, so it is only
+    // recorded when there was text to reject. lib/slo.ts turns the rate of these into a threshold.
+    if (briefText !== null) recordOutcome('detect', MODELS.brief, 'invalid_output');
+    return detectRecognitions(body); // fall back on absence / invalid output
+  }
 
   // 2. Auto-escalate a genuinely ambiguous message to the strong tier, once. A raw candidate below
   //    the confidence gate is exactly the "ambiguous turn" the escalate tier is reserved for.

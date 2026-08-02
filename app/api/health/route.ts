@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ENROLLED } from "@cohort/core/cohort";
+import { currentSlo } from "@/lib/slo";
 
 /**
  * Rally-specific liveness + feature-probe surface.
@@ -18,6 +19,12 @@ export function GET() {
     ok: true,
     enrolled: ENROLLED,
     build: process.env.VERCEL_GIT_COMMIT_SHA ?? "local",
+    // One boolean, unauthenticated, so an uptime checker can watch "is Rally degraded" without an
+    // operator credential. It leaks nothing: the numbers, the per-feature breakdown and the spend
+    // figure stay behind /api/ops/slo. `ok` above is liveness; this is the quality of what a member
+    // is actually getting, which is a different question and used to have no answer at all.
+    // Per-instance, like every meter in Rally: see the caveats in lib/slo.ts.
+    sloBreaching: currentSlo().breaching,
   });
 }
 
