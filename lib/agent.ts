@@ -1,4 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
+import {
+  resolveRetryPolicy,
+  withRetry,
+  type RetryDeps,
+  type RetryPolicy,
+  type RetryProfileName,
+} from './retry';
 
 /**
  * Rally's server-side model access — one thin, degradable wrapper for all three intelligences.
@@ -8,6 +15,13 @@ import Anthropic from '@anthropic-ai/sdk';
  * degrades to a no-op (null) when ANTHROPIC_API_KEY is absent or the call fails. The callers
  * always have a deterministic fallback, so Rally works fully with the model switched off — that
  * is what makes the AI "invisible": remove it and nothing breaks, it just gets less clever.
+ *
+ * Degrading is the LAST rung, not the first. A transient 429 or a dropped socket is not the same
+ * event as "the model is off", and treating them alike silently downgraded a user's answer for a
+ * blip that a second call would have survived. `lib/retry.ts` sits in front of the degrade: bounded
+ * retry with jittered backoff and a hard per-attempt timeout, on transient conditions only. When
+ * that ladder is exhausted the behaviour below is exactly what it always was: return null and let
+ * the caller's deterministic baseline answer.
  *
  * Model tiers form a cost-aware cascade: bulk, low-stakes classify (Brief) runs on the CHEAPEST
  * tier; the interactive default is a mid tier; `escalate` is reserved for the ambiguous, high-
@@ -130,7 +144,41 @@ export type CallClaudeOpts = {
   temperature?: number;
   /** Label for cost attribution in the meter. Defaults to the model id. */
   feature?: string;
+  /**
+   * Which resilience budget this call site gets (`lib/retry.ts` RETRY_PROFILES). `interactive` is
+   * the default because it assumes a human is waiting, so an unlabelled call site errs toward
+   * answering sooner rather than hanging longer. Bulk/background work asks for `background`.
+   */
+  retryProfile?: RetryProfileName;
+  /** Narrow overrides on the chosen profile, for a call site with a genuinely unusual budget. */
+  retryOverrides?: Partial<RetryPolicy>;
+  /** Injected clock/sleep/timer. Test hook only, so the retry ladder is asserted without real timers. */
+  retryDeps?: RetryDeps;
 };
+
+/**
+ * Some providers report usage on the ERROR of a call that still burned tokens (a response that
+ * failed after generation, a mid-stream overload). The meter must see those: a retried call that
+ * consumed tokens twice cost twice, and a cost meter that only counts successes quietly understates
+ * spend exactly when spend is spiking. Returns null when the error carries no usage, which is the
+ * common case.
+ */
+export function usageFromError(err: unknown): Usage | null {
+  const seen = new Set<unknown>();
+  const visit = (node: unknown, depth: number): Usage | null => {
+    if (!node || typeof node !== 'object' || depth > 3 || seen.has(node)) return null;
+    seen.add(node);
+    const rec = node as Record<string, unknown>;
+    const usage = rec.usage as Record<string, unknown> | undefined;
+    if (usage && typeof usage === 'object') {
+      const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0;
+      const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+      if (inputTokens > 0 || outputTokens > 0) return { inputTokens, outputTokens };
+    }
+    return visit(rec.error, depth + 1) ?? visit(rec.response, depth + 1) ?? visit(rec.body, depth + 1);
+  };
+  return visit(err, 0);
+}
 
 /**
  * The metered result of one call: the text (null when the model returned no text block) plus the
@@ -154,33 +202,66 @@ export type CallClaudeResult = {
  */
 export async function callClaudeDetailed(opts: CallClaudeOpts): Promise<CallClaudeResult | null> {
   const key = process.env.ANTHROPIC_API_KEY;
+  // No key: this is not a failure to retry, it is the model being switched off. Return before any
+  // client is constructed, so with no key the provider is never contacted at all.
   if (!key) return null;
+
+  const policy = resolveRetryPolicy(opts.retryProfile, opts.retryOverrides);
+  const feature = opts.feature ?? opts.model;
+  const startedAt = Date.now();
+
   try {
-    const client = new Anthropic({ apiKey: key });
-    const startedAt = Date.now();
-    const res = await client.messages.create({
-      model: opts.model,
-      max_tokens: opts.maxTokens ?? 1024,
-      // Only pass a sampling param to models that accept one. The reasoning tiers (Sonnet 5, Opus
-      // 4.8, ...) reject `temperature` with a 400; for those we omit it and lean on the grounded,
-      // constraining system prompts for determinism instead.
-      ...(supportsSampling(opts.model) ? { temperature: opts.temperature ?? 0 } : {}),
-      system: opts.system,
-      messages: [{ role: 'user', content: opts.prompt }],
-    });
-    const latencyMs = Date.now() - startedAt;
-    const usage: Usage = {
-      inputTokens: res.usage?.input_tokens ?? 0,
-      outputTokens: res.usage?.output_tokens ?? 0,
-    };
-    if (res.usage) {
-      recordUsage(opts.feature ?? opts.model, opts.model, usage);
-    }
-    const block = res.content.find((b) => b.type === 'text');
-    const text = block && block.type === 'text' ? block.text : null;
-    return { text, model: opts.model, usage, costUsd: estimateCostUsd(opts.model, usage), latencyMs };
+    return await withRetry(
+      async ({ signal }) => {
+        // maxRetries: 0 is deliberate and load-bearing. The SDK retries twice by default; with our
+        // own ladder in front that would be up to 9 provider calls for one logical request, on a
+        // latency budget nobody chose. lib/retry.ts is the single retry authority; the SDK just
+        // makes the call. The per-request `timeout` mirrors our attempt deadline so the socket is
+        // released at the same moment we stop waiting on it.
+        const client = new Anthropic({ apiKey: key, maxRetries: 0 });
+        try {
+          const res = await client.messages.create(
+            {
+              model: opts.model,
+              max_tokens: opts.maxTokens ?? 1024,
+              // Only pass a sampling param to models that accept one. The reasoning tiers (Sonnet 5,
+              // Opus 4.8, ...) reject `temperature` with a 400; for those we omit it and lean on the
+              // grounded, constraining system prompts for determinism instead. A 400 is also exactly
+              // the class of error the retry layer refuses to repeat.
+              ...(supportsSampling(opts.model) ? { temperature: opts.temperature ?? 0 } : {}),
+              system: opts.system,
+              messages: [{ role: 'user', content: opts.prompt }],
+            },
+            { signal, timeout: policy.attemptTimeoutMs },
+          );
+          const usage: Usage = {
+            inputTokens: res.usage?.input_tokens ?? 0,
+            outputTokens: res.usage?.output_tokens ?? 0,
+          };
+          if (res.usage) recordUsage(feature, opts.model, usage);
+          const block = res.content.find((b) => b.type === 'text');
+          const text = block && block.type === 'text' ? block.text : null;
+          return {
+            text,
+            model: opts.model,
+            usage,
+            costUsd: estimateCostUsd(opts.model, usage),
+            latencyMs: Date.now() - startedAt,
+          };
+        } catch (err) {
+          // A failed attempt that still burned tokens is still spend. Meter it before the retry
+          // layer decides what to do with the error, so the cost of resilience is visible.
+          const spent = usageFromError(err);
+          if (spent) recordUsage(feature, opts.model, spent);
+          throw err;
+        }
+      },
+      policy,
+      opts.retryDeps,
+    );
   } catch {
-    // Rate limit, timeout, bad key, malformed response — all the same to the caller: degrade.
+    // The ladder is exhausted (or the failure was permanent, e.g. a bad key or a bad request).
+    // Same contract as always: degrade to null and let the caller's deterministic baseline answer.
     return null;
   }
 }

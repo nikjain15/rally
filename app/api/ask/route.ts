@@ -88,6 +88,10 @@ export async function POST(req: Request) {
       'or attribute words to people that are not in the transcript.',
     prompt: `Channel transcript:\n${transcript}\n\nQuestion: ${body.question}`,
     maxTokens: 700,
+    // A human is watching a spinner on this one, so it takes the interactive budget: a couple of
+    // retries to ride out a rate-limit blip, bounded hard in total elapsed time. Past that, the
+    // honest "unavailable" below is kinder than a request that hangs.
+    retryProfile: 'interactive',
   });
 
   if (answer == null) {

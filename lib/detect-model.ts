@@ -75,8 +75,11 @@ export function gateDetections(parsed: RawDetection[], threshold = CONFIDENCE_TH
  *     tier (`MODELS.escalate`, Opus) for a better judgment before we decide. This is bounded (a
  *     single extra call) and metered through `callClaude`'s cost meter. Opus rejects sampling, so
  *     no temperature is sent.
- *  3. On absence of a key, or any failure/invalid output at either tier, we fall back to the
- *     deterministic `detectRecognitions`, so the result is never worse than the baseline.
+ *  3. Each tier's call is retried on transient failures first (`lib/retry.ts`, the patient
+ *     `background` budget, since detection is bulk and nobody is blocked on it). Only once that
+ *     ladder is exhausted, or on absence of a key, or on invalid output at either tier, do we fall
+ *     back to the deterministic `detectRecognitions`, so the result is never worse than the
+ *     baseline, and a single rate-limit blip no longer costs us the smarter read.
  */
 export async function detectRecognitionsSmart(body: string): Promise<DetectedRecognition[]> {
   if (!hasModel()) return detectRecognitions(body);
@@ -90,6 +93,10 @@ export async function detectRecognitionsSmart(body: string): Promise<DetectedRec
     prompt: body,
     maxTokens: 300,
     temperature: 0,
+    // Detection is bulk and post-hoc: the message is already posted and nobody is blocked on the
+    // suggestion, so this path gets the patient budget (longer backoff, longer total). A transient
+    // 429 here is worth waiting out rather than dropping straight to the regex baseline.
+    retryProfile: 'background',
   });
 
   const parsed = extractJson(briefText, isDetections);
@@ -105,6 +112,7 @@ export async function detectRecognitionsSmart(body: string): Promise<DetectedRec
       system: DETECT_SYSTEM,
       prompt: body,
       maxTokens: 300,
+      retryProfile: 'background', // same bulk path, same patient budget.
     });
     const escalated = extractJson(escalateText, isDetections);
     if (escalated) return gateDetections(escalated); // trust the stronger tier's re-read

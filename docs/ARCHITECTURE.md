@@ -124,7 +124,8 @@ sequenceDiagram
 ## The AI layer, no authority, always degradable
 
 `lib/agent.ts` is the single model wrapper. `callClaudeDetailed`/`callClaude` return the metered
-text (or `null` on a missing key or any failure); `extractJson` parses and **schema-validates**
+text, or `null` on a missing key or a failure that survived the retry ladder described below;
+`extractJson` parses and **schema-validates**
 model output before it is trusted. Every call is metered (tokens + estimated USD, keyed by
 feature) through `recordUsage`. The model paths run through the embedded `@conduit/client` seam
 (`inferViaConduit`, `runAgentViaConduit` in `lib/conduit/rally-client.ts`), which wraps Rally's own
@@ -138,6 +139,43 @@ baseline or fallback:
 | Brief ("catch me up") | none (ranking is fully deterministic) | `buildBrief` ranking, no model call | n/a |
 | Ask (channel Q&A / summary) | ground an answer in retrieved messages | abstains ("couldn't find anything") | `claude-sonnet-5` (default) |
 | Home assistant | bounded reason-act loop over read/draft tools | panel still renders; tools are typed | `claude-sonnet-5` (default) |
+
+### The failure ladder (what happens when the provider misbehaves)
+
+Degrading to the deterministic baseline is a **feature**, but it is the LAST rung, not the first. A
+transient rate limit is not the same event as "the model is off", and treating them alike used to
+downgrade a user's answer for a blip a second call would have survived. `lib/retry.ts` sits in front
+of the degrade: bounded retry, exponential backoff with **full jitter**, and a hard per-attempt
+timeout. It is the single retry authority, so `lib/agent.ts` constructs the Anthropic client with
+`maxRetries: 0`, because two retry layers would multiply into up to nine provider calls per request.
+
+| Rung | Condition | What we do | What the user sees |
+|---|---|---|---|
+| 1 | Call succeeds | nothing | the model answer |
+| 2 | Transient: 429, 500, 502, 503, 504, 529, dropped socket, attempt timeout | retry with jittered backoff, honouring `Retry-After` up to a cap | the model answer, a beat later |
+| 3 | Permanent: 400, 401, 403, 404, anything else | no retry at all, fail immediately | the deterministic fallback, with no added wait |
+| 4 | Retry cap or total budget spent | stop | the deterministic fallback |
+| 5 | No `ANTHROPIC_API_KEY` | never contact the provider | the deterministic fallback |
+
+Rung 4 and rung 5 land in exactly the same place as before this layer existed: `callClaudeDetailed`
+returns `null`, and each intelligence answers from its baseline (detection from the regex grammar,
+Ask with an honest "unavailable" 503, the assistant with its safe fallback reply). Nothing about the
+"AI-optional" contract changed; a rung was added above it.
+
+Budgets are per call site, because the answer to "how long should this wait" depends on who is
+waiting (`RETRY_PROFILES`):
+
+| Profile | Used by | Retries | Per attempt | Total budget | Why |
+|---|---|---|---|---|---|
+| `interactive` | Ask (`app/api/ask`) | 2 | 15s | 25s | a human is watching a spinner; past 25s "unavailable" is the kinder answer |
+| `agentStep` | the Home assistant loop | 1 | 15s | 20s | up to `MAX_AGENT_STEPS = 6` calls per turn, so a per-step budget must not compound |
+| `background` | recognition detection (both tiers) | 2 | 20s | 45s | bulk and post-hoc; nobody is blocked, so a 429 is worth waiting out |
+
+Three properties are load-bearing and are asserted in `tests/unit/retry.test.ts`: permanent failures
+are **never** retried (a 400 from the sampling contract or a 401 from a bad key would fail
+identically forever), an absurd `Retry-After` is **capped** rather than obeyed, and **total elapsed
+time is bounded** even when every attempt hangs. A failed attempt that still burned tokens is fed to
+`recordUsage`, so the cost meter cannot understate spend precisely when spend is spiking.
 
 ### The cost cascade (recognition detection)
 

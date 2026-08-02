@@ -146,6 +146,11 @@ export function buildCallModel(deps: {
       system: protocol,
       prompt: renderTranscript(messages),
       maxTokens: deps.maxTokens ?? 1024,
+      // Per-STEP budget, not per-turn. A user is waiting, but this call can happen up to
+      // MAX_AGENT_STEPS times in one turn, so an interactive budget per step would compound into a
+      // minutes-long turn. `agentStep` keeps one retry and a tight total so the whole loop stays
+      // bounded; a step that still fails ends the loop in its existing safe fallback.
+      retryProfile: 'agentStep',
     });
 
     const parsed = extractJson<{ tool?: unknown; args?: unknown; final?: unknown }>(
