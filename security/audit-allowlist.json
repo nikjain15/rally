@@ -1,15 +1,8 @@
 {
   "note": "Suppressions for scripts/audit-gate.mts. Every entry is a decision someone has to make again on its expiry date: an entry past `expires` FAILS the build, exactly like an unreviewed advisory. Deleting an expired entry without re-reading it is the failure mode this file exists to make visible, so keep the reason specific enough that the next reader can check it.",
+  "resolved": {
+    "sharp GHSA-f88m-g3jw-g9cj": "Entry removed 2026-08-02, fixed rather than expired. It argued that sharp >=0.35.0 could not be taken because next 16.2.12 declares optionalDependencies.sharp '^0.34.5', and that forcing it through an npm override was a 0.x major bump it would not risk. The bump was then tried on Pulse, which runs the identical next 16.2.12, and it built clean; it was tried here and typecheck, lint, 226 unit tests, 10 eval tests and a production build all passed on sharp 0.35.3. The caution was reasonable and it was also untested, which is the part worth remembering: an unverified risk was allowed to hold a high advisory open for months. next.config.ts still sets images.unoptimized, so the reachability argument stands as well; it is now a second line of defence behind a real fix instead of the only one."
+  },
   "maxHorizonDays": 180,
-  "entries": [
-    {
-      "package": "sharp",
-      "ghsa": "GHSA-f88m-g3jw-g9cj",
-      "severity": "high",
-      "scope": "runtime, but structurally unreachable",
-      "reason": "Four inherited libvips CVEs in sharp <0.35.0. sharp reaches Rally only as an optional dependency of next, and the only code path that loads it is the Image Optimization endpoint /_next/image. Rally renders zero next/image components (grep: the sole <img> is components/rally-nav.tsx:148, a plain tag on a GitHub avatar URL) and next.config.ts now sets images.unoptimized, which switches that endpoint off, so sharp is never required at runtime. Reaching the libvips decoders would additionally require an attacker-supplied image served from Rally's own origin: no remotePatterns are configured, so remote URLs are rejected, and Rally has no image upload anywhere. The fix is sharp >=0.35.0, which next 16.2.12 forbids (it declares optionalDependencies.sharp '^0.34.5'); forcing it through an npm override is a 0.x major bump outside the parent's declared range and is deliberately NOT applied here. FLAGGED FOR A HUMAN: take sharp >=0.35.0 the moment a next release widens that range, and drop this entry.",
-      "link": "https://github.com/advisories/GHSA-f88m-g3jw-g9cj",
-      "expires": "2026-11-30"
-    }
-  ]
+  "entries": []
 }
