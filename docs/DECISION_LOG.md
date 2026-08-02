@@ -191,6 +191,27 @@ Closes finding SH10.
   loads it. Turning an argued non-reachability into a structural one was worth more than the version
   bump, and the version bump is flagged rather than applied.
 
+- **Correction, 2026-08-02: the flagged bump was applied, and it was never as risky as this said.**
+  The paragraph above is right that structural unreachability beats an argument. It is wrong to have
+  stopped there. "Forcing a 0.x major outside the range `next` declares" was written as a reason not
+  to try, and nobody had tried. Pulse runs the identical `next 16.2.12`; the override built clean
+  there, then clean here. `package.json` now carries `overrides.sharp: "^0.35.0"`, resolving 0.35.3,
+  and typecheck, lint, 226 unit tests, 10 eval tests and a production build are all green on it.
+  `security/audit-allowlist.json` is now empty, and its `resolved` block records why the entry was
+  deleted rather than re-dated. `images: { unoptimized: true }` stays, because a fix plus removed
+  reachability beats either alone. The lesson is not about sharp: an untested worry held a high
+  advisory open until November, inside the one mechanism built to stop exactly that.
+
+- **What is left, and it is not gated.** Three moderates. `@hono/node-server` and
+  `@opentelemetry/core` arrive through `firebase-tools`, a dev dependency, and never ship. `uuid
+  9.0.1` is production, reached through `firebase-admin 14.2.0` and `@google-cloud/storage 7.21.0`,
+  both already the newest published versions, so the only fix npm offers is four majors back.
+  [GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq) affects `uuid` v3, v5 and
+  v6 and only with a `buf` argument; a grep of every uuid call site in the installed tree returns
+  only `v1` (dev-only) and `v4`. If that grep ever returns a v3, v5 or v6 line the argument is dead.
+  Pulse carries the identical chain and the identical argument, written out in full in its
+  `docs/DECISION_LOG.md`.
+
 - **Scope:** `.github/workflows/ci.yml`, `scripts/audit-gate.mts`, `security/audit-allowlist.json`,
   `.gitleaks.toml`, `next.config.ts`, `package.json`. Verified by 23 tests in
   `tests/unit/audit-gate.test.ts`, one of which runs the committed allowlist against the real clock.

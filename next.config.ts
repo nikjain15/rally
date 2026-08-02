@@ -18,10 +18,15 @@ const nextConfig: NextConfig = {
   // plain <img> on a GitHub-hosted URL), so the Image Optimization endpoint at /_next/image is
   // dead surface that ships anyway. It is also the ONLY path by which `sharp`, and therefore
   // libvips, is ever loaded at runtime. sharp <0.35.0 carries GHSA-f88m-g3jw-g9cj (four inherited
-  // libvips CVEs) and next 16.2.x pins `sharp: ^0.34.5`, so the version cannot be fixed without
-  // forcing a dependency outside the range its parent declares. Turning optimization off removes
-  // the reachability instead of arguing about it: with `unoptimized`, /_next/image never decodes
-  // an image and sharp is never required. See security/audit-allowlist.json, entry `sharp`.
+  // libvips CVEs) and next 16.2.x pins `sharp: ^0.34.5`. Turning optimization off removes the
+  // reachability instead of arguing about it: with `unoptimized`, /_next/image never decodes an
+  // image and sharp is never required.
+  //
+  // Updated 2026-08-02: the version IS now fixed too. `overrides.sharp: ^0.35.0` in package.json
+  // forces 0.35.3 past the range next declares, verified by a green build here and on Pulse,
+  // which runs the same next 16.2.12. The allowlist entry that used to justify this line is gone
+  // (see security/audit-allowlist.json, `resolved`). This setting stays: the endpoint is still
+  // dead surface, and a fix plus removed reachability beats either alone.
   images: { unoptimized: true },
 };
 
