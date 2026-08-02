@@ -307,6 +307,38 @@ describe('recognitions — points only on the helped peer\'s confirm', () => {
   });
 });
 
+describe('recognitionPairs — the economy guard is nobody\'s business but the server\'s', () => {
+  // The per-pair rolling-window allowance (finding D-P0-3) is bookkeeping the confirm
+  // transaction owns. A client that could write it would erase the cap, and a client that could
+  // read it would know exactly when a pair's points run out.
+  it('denies a member reading how much allowance a pair has left', async () => {
+    await seed(env, 'recognitionPairs/uid_alice__uid_bob', {
+      helperUid: ALICE,
+      helpedUid: BOB,
+      awardedAt: [1, 2, 3],
+    });
+    await assertFails(getDoc(doc(as(env, ALICE), 'recognitionPairs/uid_alice__uid_bob')));
+  });
+
+  it('denies a member clearing a pair\'s spent allowance to unlock more points', async () => {
+    await seed(env, 'recognitionPairs/uid_alice__uid_bob', {
+      helperUid: ALICE,
+      helpedUid: BOB,
+      awardedAt: [1, 2, 3],
+    });
+    await assertFails(
+      updateDoc(doc(as(env, ALICE), 'recognitionPairs/uid_alice__uid_bob'), { awardedAt: [] }),
+    );
+    await assertFails(deleteDoc(doc(as(env, BOB), 'recognitionPairs/uid_alice__uid_bob')));
+  });
+
+  it('denies a member inventing a pair record at all', async () => {
+    await assertFails(
+      setDoc(doc(as(env, ALICE), 'recognitionPairs/uid_alice__uid_carol'), { awardedAt: [] }),
+    );
+  });
+});
+
 describe('commitments — you own your promise, the server owns its completion', () => {
   it('lets a member create their own commitment', async () => {
     await assertSucceeds(setDoc(doc(as(env, ALICE), 'commitments/k1'), commitment(ALICE)));

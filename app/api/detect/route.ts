@@ -48,6 +48,10 @@ export async function POST(req: Request) {
     const id = await suggestRecognition(db, {
       helperUid,
       helpedUid,
+      // The verified author wrote the thanks, so they are both the helped peer and the author.
+      // Recording it explicitly is what lets confirm pay them nothing for confirming their own
+      // sentence, instead of inferring it (finding D-P0-3).
+      authorUid: helpedUid,
       sourceMsgRef: body.sourceMsgRef,
       kind: d.kind,
     });

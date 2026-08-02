@@ -16,7 +16,8 @@ This is not a set of ADRs. It is an index and a change record. Per-decision ADRs
 anywhere in the repo, which is finding A-P1-3 and is still open. When they are written, this file
 should point at them rather than replace them.
 
-Last updated 2026-08-02 against commit `8bca84e`.
+Last updated 2026-08-02 against commit `8bca84e`, then amended the same day to add DL-6, which
+supersedes DL-3 and closes finding D-P0-3.
 
 ---
 
@@ -27,7 +28,7 @@ turned out to be false. Listing them is the point: an assumption that is written
 
 | # | Assumption | Status | What would falsify it |
 |---|---|---|---|
-| AS-1 | Peer confirmation is enough to make recognition trustworthy | **Partly false as stated.** It stops self-award and client-minted points, both proven by `tests/rules/firestore.test.ts`. It does not stop a cooperating pair (finding D-P0-3) | Already falsified for the pair case. The absolute claim in `README.md` should be narrowed regardless of whether the code changes |
+| AS-1 | Peer confirmation is enough to make recognition trustworthy | **False, and no longer relied on.** Confirmation alone stops self-award and client-minted points, both proven by `tests/rules/firestore.test.ts`, and it never stopped a cooperating pair (finding D-P0-3). Since DL-6 the economy no longer rests on confirmation alone: a per-pair rolling allowance bounds it | Already falsified for the pair case, which is why the guard exists. It would be falsified again by a ring of manufactured accounts, which nothing in Rally defends against. The absolute claim in `README.md` should still be narrowed |
 | AS-2 | Members will actually confirm the recognitions suggested to them | **Unverified.** Nothing in the app records the suggested-to-confirmed rate, though `docs/PRD.md` names it as a supporting metric | Measuring it. If the conversion is low, the north-star metric has no supply and the whole loop is decorative |
 | AS-3 | Cohort scale is representative enough to defer scaling work | **Holds today, will not hold later.** The full ledger scan in `lib/leaderboard-admin.ts` line 45 is O(all events ever) and the 16ms measurement was taken at exactly the scale that hides it | Any deployment past a few hundred active members, or a long-lived cohort where the ledger keeps growing |
 | AS-4 | The model layer improves on the regex baseline | **Never measured.** With no API key the model falls back to the baseline, so the CI comparison compares the baseline to itself | One eval run with a live key. Until then, no claim in either direction is supported |
@@ -40,7 +41,7 @@ turned out to be false. Listing them is the point: an assumption that is written
 
 ## Decisions these reviews changed
 
-Exactly one. That is the honest count.
+One at review time, and one since. That is the honest count.
 
 ### DL-1 The hosted MCP transport claim is corrected
 
@@ -52,6 +53,60 @@ Exactly one. That is the honest count.
   `lib/mcp/` contains only `rally-server.ts`, `rally-tools.ts` and `stdio-entry.ts`, and no route
   under `app/api/` mentions SSE.
 - **Scope:** documentation only. No code changed.
+
+### DL-6 The recognition economy gets a boundary: self-authored thanks pay zero, and each pair has a daily allowance
+
+**This supersedes DL-3, which defended leaving the farming vector alone.** DL-3 is left below with
+the reasoning that produced this shape, because a reversed decision is more useful with its original
+argument attached than without it.
+
+- **Decision:** two guards, both inside the existing confirm transaction in
+  `lib/recognition-admin.ts`.
+  1. A recognition now records `authorUid`, the person who wrote the message the credit came from
+     (`app/api/detect/route.ts` sets it to the verified author). The confirmer's small thank-you,
+     `CONFIRM_THANKS`, is paid only when the confirmer is *not* that author. Today's detector always
+     makes the author the helped peer, so confirming your own "thanks @bob" now pays you zero.
+  2. One helper can bank points from the same helped peer at most three times per rolling 24 hours,
+     tracked per ordered pair in a new server-only `recognitionPairs` collection, read and written in
+     the same transaction as the award. Past the allowance the recognition **still confirms and still
+     posts to the pulse feed**; it is worth zero XP and is marked `capped`.
+
+- **Why this shape:** the alternative that actually kills farming outright is requiring a third-party
+  confirmer, and that was rejected because in a two-person conversation nobody would be able to
+  confirm anything. That is not a hardened loop, it is no loop. Zeroing the self-confirm thank-you
+  alone was also rejected as insufficient: it removes 2 points from the author and leaves the
+  helper's 12, so a pair alternating still mints 12 a message. Only the pair allowance turns the
+  farm's yield from "grows with every message" into "a constant per day", and only the "still
+  confirms, just worth nothing" behaviour keeps it from punishing real pairs.
+
+- **The tradeoff accepted, stated plainly:** two teammates who genuinely help each other more than
+  three times in one direction in one day will see later recognitions pay nothing. That is a real
+  cost and it lands on Rally's best users. It is accepted because what those users lose is the
+  points, not the recognition: the confirm still lands, the pulse feed still announces it, and the
+  record still shows it. A points ceiling on one relationship is a defensible thing for the product
+  to say out loud, in a way that "your thanks did not register" would never be.
+
+- **Rejected alongside:** reciprocity damping in `lib/leaderboard-admin.ts`. The DL-3 objection to it
+  stands unchanged: a rank nobody can explain erodes exactly the trust the ledger exists to build. A
+  flat, statable rule beats a smooth one here.
+
+- **Also accepted:** the numbers, three per day per direction, are chosen not measured. Nothing in
+  Rally records how often a real pair recognises each other, per AS-2 and finding D-P1-8, so the cap
+  was set well above plausible behaviour rather than tuned. When the recognition funnel is finally
+  instrumented, this is the first number that should be re-derived from data, and it is the reason
+  both constants are exported and unit-tested rather than buried.
+
+- **What is still not solved:** the allowance is per pair, so a ring of many accounts still scales
+  linearly with the number of accounts. Rally has no defence against manufactured identities and
+  this decision does not add one. At a cohort where every account is a known person, that is an
+  accepted limit, not a solved problem.
+
+- **Scope:** `lib/recognition-admin.ts`, `app/api/detect/route.ts`, and a deny-all rule for the new
+  `recognitionPairs` collection in `firestore.rules`. The confirm and award logic is where the fix
+  belongs; the rules were never wrong here, which is why 45 of the 48 rules tests are untouched.
+  Verified with `tests/unit/recognition-economy.test.ts`, the new group in
+  `tests/integration/recognition.test.ts`, and three added rules tests. Every new integration test
+  was confirmed to fail with the cap removed.
 
 ---
 
@@ -71,7 +126,7 @@ rollup that disagrees with the ledger is a worse failure than a slow query. The 
 reconciliation first, rollup second, not the reverse. The caveat is AS-3: this defence expires at
 scale and nothing currently triggers a re-examination.
 
-### DL-3 Peer confirmation stays as the only anti-gaming control on the economy
+### DL-3 Peer confirmation stays as the only anti-gaming control on the economy: SUPERSEDED by DL-6
 
 Attacked by D-P0-3: two members can pump each other indefinitely, 12 points per message each way,
 bounded only by a per-instance rate limit.
@@ -86,6 +141,10 @@ What is **not** defensible is the absolute phrasing. "Recognition that can't be 
 the code delivers. The narrower true claim, which is still a strong one, is that no client can mint
 points and nobody can award themselves, both proven by the rules tests. Rewording is an open item
 against `README.md` and `docs/PRD.md`.
+
+**Reversed on 2026-08-02 by DL-6.** The defence assumed a cap that refuses the recognition. A cap
+that zeroes only the points, while the confirm and the pulse still happen, does not carry the cost
+this entry was protecting against. The wording item above is still open, and DL-6 does not close it.
 
 ### DL-4 The 50-case labelled set stays
 

@@ -184,6 +184,15 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // --- recognitionPairs (server-only) --------------------------------------
+    // How many point-bearing awards have flowed helper ← helped inside the rolling window. It
+    // is the economy guard's bookkeeping, written and read ONLY inside the confirm transaction
+    // (Admin bypasses these rules). Deny-all for clients: readable, it would tell one member
+    // exactly how much allowance a pair has left, and writable it would erase the cap.
+    match /recognitionPairs/{pair} {
+      allow read, write: if false;
+    }
+
     // --- xpEvents ------------------------------------------------------------
     // Append-only ledger. The single source of XP/rank/reputation — all derived by query +
     // reduce, never a mutable total. Written EXCLUSIVELY by admin routes; clients get read

@@ -98,6 +98,8 @@ export function recognition(helperUid: string, helpedUid: string, over: Record<s
   return {
     helperUid,
     helpedUid,
+    // Who wrote the message the credit came from. The detector makes it the helped peer.
+    authorUid: helpedUid,
     sourceMsgRef: 'channels/c1/messages/m1',
     kind: 'unblocked',
     status: 'suggested',

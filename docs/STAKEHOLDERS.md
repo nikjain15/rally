@@ -24,6 +24,12 @@ verified from what Rally has only asserted.
 Everything below was produced on 2026-08-02 against commit `8bca84e`, with `npm run typecheck`,
 `npm run lint`, `npm run test:unit` and `npm run test:evals` green.
 
+One finding has been closed since, on the same day: D-P0-3, the reciprocal farming vector. Its entry
+is amended in place rather than rewritten, so the original description of the flaw still stands
+above the description of the fix. Every other finding is still open as written. The closing pass ran
+the full gate including the emulator suites: typecheck, lint, unit, evals, rules and integration,
+all green.
+
 ---
 
 ## Roles that would need to be involved
@@ -50,6 +56,15 @@ terms. What the code actually guarantees is narrower and worth being precise abo
 *mint* points, and a person cannot award *themselves*. Those are both true and both proven by the
 rules tests. What is not guaranteed is that two consenting members cannot pump each other, which
 finding D-P0-3 below walks through with file references.
+
+**Update, 2026-08-02: the pumping vector is closed, the wording problem is not.** Confirming your own
+thanks now pays nothing and a per-pair daily allowance caps what one helper can earn from one peer,
+so the yield of a cooperating pair is bounded rather than unlimited. That makes the claim much
+closer to true, and it still is not the absolute claim: a ring of many accounts scales with the
+number of accounts, and nothing in Rally defends against manufactured identities. The honest
+sentence is "recognition a client cannot mint, nobody can award themselves, and no pair can farm",
+and the documents that say more than that should be narrowed. Still open against `README.md` and
+`docs/PRD.md`.
 
 The risk is not the vulnerability. A cohort of 65 people who know each other is not where this gets
 exploited. The risk is the gap between the absolute claim and the narrower guarantee, because that
@@ -101,6 +116,11 @@ render the failure from the boolean `lib/data.ts` already returns. Open.
 
 ### D-P0-3 A cooperating pair can farm the ledger, and the guard only blocks the narrow case
 
+**Closed on 2026-08-02.** The finding below is left exactly as it was written, because the record of
+what was wrong is worth more than a tidy edit. What changed is recorded under "The fix that shipped"
+at the end of this entry, and the decision and its cost are in
+[`DECISION_LOG.md`](DECISION_LOG.md) as DL-6, which supersedes DL-3.
+
 This is the social-design attack, and it lands.
 
 `app/api/detect/route.ts` treats the verified message **author as the helped party** and any handle
@@ -122,6 +142,43 @@ test stays green. The append-only ledger is intact. The *economy* on top of it i
 transaction already runs, plus reciprocity damping in `lib/leaderboard-admin.ts` so mutual pairs
 contribute sublinearly. Neither exists. Open, and deliberately not fixed in this pass, because it is
 a product economics decision, not a bug fix.
+
+**The fix that shipped.** Two changes, both inside the confirm transaction in
+`lib/recognition-admin.ts`, and none in `firestore.rules`, because nothing here was ever a rules
+failure.
+
+1. **Writing your own thanks pays you nothing.** The suggestion now records `authorUid`, the person
+   who wrote the source message, set by `app/api/detect/route.ts` to the verified author. Confirm
+   pays `CONFIRM_THANKS` only when the confirmer is not that author. In today's flow the author is
+   always the helped peer, so confirming your own "thanks @bob" is now worth zero rather than 2. The
+   thank-you is still worth something when a third party wrote it, because then closing the loop
+   really is a second person's act.
+2. **A per-pair, per-direction allowance.** One helper can bank points from the same helped peer at
+   most `PAIR_AWARD_CAP = 3` times per rolling `PAIR_WINDOW_MS = 24h`, tracked in a new server-only
+   `recognitionPairs` collection read and written inside the same transaction. Past the allowance the
+   recognition **still confirms, still posts to the pulse feed, and still shows in the record**, and it
+   is simply worth zero XP, marked `capped: true` on both the recognition and its ledger row.
+
+Reciprocity damping in the leaderboard was considered and rejected: it makes rank unexplainable,
+which is the opposite of what the ledger exists to earn.
+
+What a farm does now: alternating "thanks @you" messages pay 12 points each way for the first three
+per direction per day and exactly nothing after that, so the loop's yield is a constant per day
+instead of growing with message count. What a genuine pair does now: nothing changes for them, since
+three full-value recognitions per direction per day is far above real behaviour, and past it their
+gratitude still lands publicly.
+
+Verified by `tests/integration/recognition.test.ts` ("the economy is bounded per pair, per window",
+seven tests), `tests/unit/recognition-economy.test.ts` (the rolling-window arithmetic, nine tests),
+and three new tests in `tests/rules/firestore.test.ts` proving no client can read or clear a pair's
+spent allowance. All seven of the new integration tests were confirmed to fail with the cap removed.
+The old expectation that a confirmer earns 2 for confirming their own thanks was changed, not
+deleted, and now reads as the promise that they earn nothing.
+
+The residual, stated plainly: the allowance is per ordered pair, so a ring of many accounts still
+scales linearly with the number of accounts. Nothing here defends against manufactured identities,
+and at cohort scale, where every account is a known person, that is an accepted limit rather than a
+solved problem.
 
 ### D-P1-4 Accessibility: partial manual labelling, zero verification, honest verdict is "unknown"
 
@@ -574,17 +631,21 @@ What the three reviews moved, what they did not, and where Nik would argue back.
 
 | Finding | Rank | What changed |
 |---|---|---|
-| A-P1-4 | P1 | `docs/ARCHITECTURE.md` line 233 no longer claims a hosted SSE transport exists. It now states stdio is the only shipped transport and points at `docs/MCP.md`. This was the only substantive edit; no code changed. |
+| A-P1-4 | P1 | `docs/ARCHITECTURE.md` line 233 no longer claims a hosted SSE transport exists. It now states stdio is the only shipped transport and points at `docs/MCP.md`. This was the only substantive edit at review time; no code changed. |
+| D-P0-3 | P0 | **Closed in a later pass, 2026-08-02.** Confirming your own thanks now pays the confirmer zero, and a per-pair rolling-window allowance caps what one helper can earn from one peer per day. Code in `lib/recognition-admin.ts`, decision in `DECISION_LOG.md` DL-6. |
 | All others | P0 to P2 | Nothing. Recorded open, each named with the file that would fix it. |
 
-That ratio is deliberate and is the point of the exercise. Twenty-five findings, one change. A review
-pass that "fixed" twenty-four findings in an afternoon would mean either the findings were trivial or
-the fixes were invented, and inventing fixes is the failure mode this audit exists to remove.
+That ratio is deliberate and is the point of the exercise. Twenty-five findings, one change at review
+time and one more since. A review pass that "fixed" twenty-four findings in an afternoon would mean
+either the findings were trivial or the fixes were invented, and inventing fixes is the failure mode
+this audit exists to remove. D-P0-3 was fixed later, on its own, after the tradeoff had been argued
+out rather than assumed.
 
 ### Findings by rank (25 total)
 
-**P0 (7):** D-P0-1 brief failure state reads as reassurance; D-P0-2 confirm loop has no state
-machine; D-P0-3 a cooperating pair can farm the ledger; A-P0-1 leaderboard rescans the full ledger
+**P0 (7, one closed):** D-P0-1 brief failure state reads as reassurance; D-P0-2 confirm loop has no
+state machine; **D-P0-3 a cooperating pair can farm the ledger, CLOSED 2026-08-02**; A-P0-1
+leaderboard rescans the full ledger
 per call; A-P0-2 privacy and kindness guarantees enforced above the layer that exposes the data;
 E-P0-1 eval class balance inverted relative to the stream; E-P0-2 fifty cases cannot resolve the
 asserted difference.
@@ -603,13 +664,19 @@ README test counts drifted; E-P2-7 no drift-versus-noise protocol.
 Recording the counterarguments, because a review where the author agrees with everything is a review
 that was not adversarial.
 
-- **On D-P0-3, the farming vector.** The defence is not "it is not exploitable", because it is. The
-  defence is that the fix is not obviously good. A per-pair cap punishes the two people who genuinely
-  do pair most often, which is precisely the behaviour Rally exists to reward, and reciprocity damping
-  makes rank harder to explain, which erodes the trust the ledger was built to earn. The vulnerability
-  is real; the cure may be worse than the disease at cohort scale. What is not defensible is the
-  absolute phrasing of the claim in the README, and that should change regardless of whether the code
-  does.
+- **On D-P0-3, the farming vector.** *(Argued at review time, then overturned. Kept because the
+  argument is what produced the shape of the fix.)* The defence is not "it is not exploitable",
+  because it is. The defence is that the fix is not obviously good. A per-pair cap punishes the two
+  people who genuinely do pair most often, which is precisely the behaviour Rally exists to reward,
+  and reciprocity damping makes rank harder to explain, which erodes the trust the ledger was built
+  to earn. The vulnerability is real; the cure may be worse than the disease at cohort scale. What is
+  not defensible is the absolute phrasing of the claim in the README, and that should change
+  regardless of whether the code does.
+  **What overturned it:** the objection was to a cap that *refuses* the recognition. A cap that only
+  zeroes the points, while the recognition still confirms and still reaches the pulse feed, does not
+  punish the pair who genuinely pair most often, because the thing they actually want, being seen
+  thanking each other, is untouched. Reciprocity damping was still rejected on the explainability
+  argument above, which stands. See DL-6.
 - **On A-P0-1, the ledger scan.** At 65 users, correct and simple beats fast and derived, and a rollup
   introduces a second source of truth for the number the entire product's credibility rests on. The
   scan cannot drift. A rollup can. Nik would ship the reconciliation job before the rollup, not after.

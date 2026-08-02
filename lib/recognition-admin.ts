@@ -5,11 +5,17 @@ import { FieldValue, type Firestore } from 'firebase-admin/firestore';
  *
  * The whole product promise ("the game lifts people, never punishes them; it can't be gamed")
  * lives or dies here. Rules make points client-unwritable; this module is the only thing that
- * legitimately writes them, and it does so ONLY when the *helped* peer confirms. Three
+ * legitimately writes them, and it does so ONLY when the *helped* peer confirms. Five
  * invariants it must never break:
  *   1. You cannot award yourself — a helper can't confirm their own recognition.
  *   2. Points are set by the server from the kind, never taken from client input.
  *   3. Confirm is idempotent — a double POST (two tabs, a retry) awards XP exactly once.
+ *   4. Writing your own thanks earns you nothing. The author of the source message is the
+ *      helped peer, so confirming your own "thanks @bob" is one person doing both halves of
+ *      the loop; that act pays the confirmer zero (finding D-P0-3).
+ *   5. One helper can earn points from the same helped peer at most PAIR_AWARD_CAP times per
+ *      rolling PAIR_WINDOW_MS. Past that the recognition still lands — status, pulse, feed —
+ *      it is simply worth zero. Gratitude is uncapped; the economy is not.
  * XP is written to the append-only `xpEvents` ledger; rank/reputation are computed from it,
  * never stored as a mutable total.
  */
@@ -24,11 +30,50 @@ const POINTS: Record<RecognitionKind, number> = {
   paired: 10,
 };
 
-/** A small thank-you to the person who confirmed — receiving help and closing the loop counts. */
+/**
+ * A small thank-you to the person who confirmed — receiving help and closing the loop counts.
+ * Paid ONLY when the confirmer did not write the message the recognition came from. Today the
+ * detector makes the author the helped peer, so in practice this is zero: you are not paid for
+ * typing "thanks @bob" and then clicking confirm on your own sentence. It stays in the schedule
+ * for the flow where someone else credits you (a third party writing "@bob unblocked @ana"),
+ * where closing the loop really is a separate act.
+ */
 const CONFIRM_THANKS = 2;
+
+/**
+ * The economy guard. One helper can bank points from the same helped peer this many times per
+ * rolling window; beyond that the recognition still confirms and still posts to the pulse feed,
+ * it is just worth zero XP.
+ *
+ * Three a day, per direction, is set well above genuine behaviour on purpose. The pair who
+ * really do pair all day still get paid for the first three each way and lose nothing socially
+ * after that, while a farming loop flattens to a constant instead of growing with message count.
+ */
+export const PAIR_AWARD_CAP = 3;
+export const PAIR_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export function pointsFor(kind: string): number {
   return POINTS[(kind as RecognitionKind)] ?? POINTS.answered;
+}
+
+/** Doc id for the per-direction award history. Ordered: credit flowing helper ← helped. */
+export function pairKey(helperUid: string, helpedUid: string): string {
+  return `${helperUid}__${helpedUid}`;
+}
+
+/** The award timestamps still inside the rolling window, oldest first. Pure, so it is unit-testable. */
+export function awardsInWindow(times: number[], now: number, windowMs = PAIR_WINDOW_MS): number[] {
+  return times.filter((t) => typeof t === 'number' && t > now - windowMs && t <= now).sort((a, b) => a - b);
+}
+
+/** True when this pair has already banked its allowance for the window — the next award is worth zero. */
+export function pairCapReached(
+  times: number[],
+  now: number,
+  cap = PAIR_AWARD_CAP,
+  windowMs = PAIR_WINDOW_MS,
+): boolean {
+  return awardsInWindow(times, now, windowMs).length >= cap;
 }
 
 /**
@@ -36,10 +81,14 @@ export function pointsFor(kind: string): number {
  * awards anything — a suggestion is an invitation to the helped peer, not a fait accompli.
  * Deduped by (helper, helped, sourceMsgRef) so re-running detection on the same message can't
  * spawn duplicate suggestions.
+ *
+ * `authorUid` records who actually wrote the source message. It defaults to the helped peer,
+ * which is what today's detector always produces, and it is what lets confirm tell "someone
+ * else credited you" apart from "you credited someone and then confirmed yourself".
  */
 export async function suggestRecognition(
   db: Firestore,
-  input: { helperUid: string; helpedUid: string; sourceMsgRef: string; kind: string },
+  input: { helperUid: string; helpedUid: string; sourceMsgRef: string; kind: string; authorUid?: string },
 ): Promise<string | null> {
   if (input.helperUid === input.helpedUid) return null; // you don't get credit for helping yourself
   const kind = (input.kind as RecognitionKind) in POINTS ? (input.kind as RecognitionKind) : 'answered';
@@ -51,6 +100,7 @@ export async function suggestRecognition(
     tx.set(ref, {
       helperUid: input.helperUid,
       helpedUid: input.helpedUid,
+      authorUid: input.authorUid ?? input.helpedUid,
       sourceMsgRef: input.sourceMsgRef,
       kind,
       status: 'suggested',
@@ -63,18 +113,26 @@ export async function suggestRecognition(
 }
 
 export type ConfirmResult =
-  | { ok: true; awarded: number; alreadyDone: boolean }
+  | { ok: true; awarded: number; alreadyDone: boolean; capped: boolean }
   | { ok: false; reason: 'not_found' | 'not_helped_peer' | 'self_award' | 'declined' };
 
 /**
- * Confirm a recognition as the helped peer. Awards XP to the helper (and a small thanks to
- * the confirmer), appends a pulse event, and flips status — all in one transaction so a retry
- * can't double-award. `actingUid` is the authenticated caller (verified by the route).
+ * Confirm a recognition as the helped peer. Awards XP to the helper, appends a pulse event, and
+ * flips status — all in one transaction so a retry can't double-award. `actingUid` is the
+ * authenticated caller (verified by the route); `now` is injectable so the rolling window is
+ * testable without sleeping.
+ *
+ * Two economy guards run here, and neither can refuse the recognition itself:
+ *   - the confirmer earns CONFIRM_THANKS only if they did not write the source message;
+ *   - the helper earns the kind's points only if this pair is under its rolling-window cap.
+ * A capped confirm still writes the ledger row (points 0, `capped: true`) and still posts the
+ * pulse, so the record stays complete and the thank-you still reaches the feed.
  */
 export async function confirmRecognition(
   db: Firestore,
   recognitionId: string,
   actingUid: string,
+  now: number = Date.now(),
 ): Promise<ConfirmResult> {
   const recRef = db.collection('recognitions').doc(recognitionId);
   return db.runTransaction(async (tx) => {
@@ -85,11 +143,25 @@ export async function confirmRecognition(
     if (rec.helperUid === actingUid) return { ok: false, reason: 'self_award' } as const;
     if (rec.status === 'declined') return { ok: false, reason: 'declined' } as const;
     // Idempotent: already confirmed → report success without re-awarding.
-    if (rec.status === 'confirmed') return { ok: true, awarded: 0, alreadyDone: true } as const;
+    if (rec.status === 'confirmed') {
+      return { ok: true, awarded: 0, alreadyDone: true, capped: rec.capped === true } as const;
+    }
 
-    const points: number = rec.points ?? pointsFor(rec.kind);
+    // Reads before writes: the pair's award history for this direction of credit.
+    const pairRef = db.collection('recognitionPairs').doc(pairKey(rec.helperUid, rec.helpedUid));
+    const pairSnap = await tx.get(pairRef);
+    const history: number[] = Array.isArray(pairSnap.data()?.awardedAt) ? pairSnap.data()!.awardedAt : [];
+    const recent = awardsInWindow(history, now);
+    const capped = pairCapReached(history, now);
 
-    tx.update(recRef, { status: 'confirmed' });
+    // The author of the source message wrote the thanks. If they are also the one confirming it,
+    // closing the loop is not a second act by a second person, so it pays nothing.
+    const authorUid: string = rec.authorUid ?? rec.helpedUid;
+    const thanks = authorUid === actingUid ? 0 : CONFIRM_THANKS;
+
+    const points: number = capped ? 0 : (rec.points ?? pointsFor(rec.kind));
+
+    tx.update(recRef, { status: 'confirmed', capped });
 
     // Ledger entries — deterministic ids keyed to the recognition so even a rules-bypassing
     // re-run can't create a second award for the same recognition.
@@ -98,15 +170,19 @@ export async function confirmRecognition(
       source: 'recognition',
       refId: recognitionId,
       points,
+      capped,
       createdAt: FieldValue.serverTimestamp(),
     });
-    tx.set(db.collection('xpEvents').doc(`xp_thanks_${recognitionId}`), {
-      profileUid: rec.helpedUid,
-      source: 'recognition_confirmed',
-      refId: recognitionId,
-      points: CONFIRM_THANKS,
-      createdAt: FieldValue.serverTimestamp(),
-    });
+    // No points, no row: a zero-XP ledger entry would only pad the scan the leaderboard runs.
+    if (thanks > 0) {
+      tx.set(db.collection('xpEvents').doc(`xp_thanks_${recognitionId}`), {
+        profileUid: rec.helpedUid,
+        source: 'recognition_confirmed',
+        refId: recognitionId,
+        points: thanks,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
     tx.set(db.collection('pulseEvents').doc(`pulse_rec_${recognitionId}`), {
       actorUid: rec.helperUid,
       verb: 'recognition_confirmed',
@@ -115,7 +191,22 @@ export async function confirmRecognition(
       createdAt: FieldValue.serverTimestamp(),
     });
 
-    return { ok: true, awarded: points, alreadyDone: false } as const;
+    // Only a point-bearing award consumes the allowance, so a capped confirm can never push the
+    // window further out and starve a pair who go quiet and come back.
+    if (!capped) {
+      tx.set(
+        pairRef,
+        {
+          helperUid: rec.helperUid,
+          helpedUid: rec.helpedUid,
+          awardedAt: [...recent, now],
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
+
+    return { ok: true, awarded: points, alreadyDone: false, capped } as const;
   });
 }
 
@@ -131,9 +222,11 @@ export async function declineRecognition(
     if (!snap.exists) return { ok: false, reason: 'not_found' } as const;
     const rec = snap.data()!;
     if (rec.helpedUid !== actingUid) return { ok: false, reason: 'not_helped_peer' } as const;
-    if (rec.status === 'confirmed') return { ok: true, awarded: 0, alreadyDone: true } as const;
+    if (rec.status === 'confirmed') {
+      return { ok: true, awarded: 0, alreadyDone: true, capped: rec.capped === true } as const;
+    }
     tx.update(recRef, { status: 'declined' });
-    return { ok: true, awarded: 0, alreadyDone: false } as const;
+    return { ok: true, awarded: 0, alreadyDone: false, capped: false } as const;
   });
 }
 
