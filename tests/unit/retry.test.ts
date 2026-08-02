@@ -15,8 +15,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * test waits on a real timer.
  */
 
-const { createCalls, constructorArgs, script } = vi.hoisted(() => ({
+const { createCalls, createOptions, constructorArgs, script } = vi.hoisted(() => ({
   createCalls: [] as Array<Record<string, unknown>>,
+  createOptions: [] as Array<Record<string, unknown> | undefined>,
   constructorArgs: [] as Array<Record<string, unknown>>,
   // Each entry is one scripted attempt outcome, consumed in order.
   script: [] as Array<{ text?: string; throws?: unknown }>,
@@ -28,8 +29,9 @@ vi.mock('@anthropic-ai/sdk', () => ({
       constructorArgs.push(args);
     }
     messages = {
-      create: async (args: Record<string, unknown>) => {
+      create: async (args: Record<string, unknown>, options?: Record<string, unknown>) => {
         createCalls.push(args);
+        createOptions.push(options);
         const next = script.shift() ?? { text: '[]' };
         if (next.throws) throw next.throws;
         return {
@@ -102,6 +104,7 @@ const OLD_KEY = process.env.ANTHROPIC_API_KEY;
 
 beforeEach(() => {
   createCalls.length = 0;
+  createOptions.length = 0;
   constructorArgs.length = 0;
   script.length = 0;
   resetUsage();
@@ -418,8 +421,11 @@ describe('the failure ladder around a model call (lib/agent)', () => {
 
     await callClaudeDetailed({ ...opts, retryDeps: deps, retryProfile: 'interactive' });
 
-    // The per-request timeout handed to the SDK matches the attempt deadline we enforce ourselves.
-    expect(createCalls).toHaveLength(1);
+    // The per-request timeout handed to the SDK matches the attempt deadline we enforce ourselves,
+    // and an abort signal is handed down so a hung socket is released, not just abandoned.
+    expect(createOptions).toHaveLength(1);
+    expect(createOptions[0]?.timeout).toBe(RETRY_PROFILES.interactive.attemptTimeoutMs);
+    expect(createOptions[0]?.signal).toBeInstanceOf(AbortSignal);
   });
 });
 
