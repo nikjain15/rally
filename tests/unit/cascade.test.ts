@@ -30,6 +30,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 }));
 
 import { MODELS, resetUsage, usageTotals } from '@/lib/agent';
+import { resetDetectCache } from '@/lib/detect-cache';
 import { detectRecognitionsSmart } from '@/lib/detect-model';
 
 const OLD_KEY = process.env.ANTHROPIC_API_KEY;
@@ -39,6 +40,10 @@ beforeEach(() => {
   responses.length = 0;
   resetUsage();
   process.env.ANTHROPIC_API_KEY = 'test-key';
+  // The detection cache is process-global and would otherwise carry readings between
+  // tests, so a second test using the same message body would assert zero model calls
+  // and fail for a reason that has nothing to do with what it is testing.
+  resetDetectCache();
 });
 
 afterEach(() => {
@@ -95,6 +100,64 @@ describe('model cost cascade', () => {
 
     expect(createCalls).toHaveLength(1);
     expect(createCalls[0].model).toBe(MODELS.brief);
+  });
+
+  // ── the cache, which is the cost claim in docs/COST.md ────────────────────────
+
+  it('pays for a message once: an identical repeat calls no model at all', async () => {
+    responses.push({ text: '[{"helperHandle":"dana","kind":"paired","confidence":0.8}]' });
+
+    const first = await detectRecognitionsSmart('huge thanks @dana for pairing');
+    expect(createCalls).toHaveLength(1);
+
+    const second = await detectRecognitionsSmart('huge thanks @dana for pairing');
+    expect(createCalls).toHaveLength(1); // still one: the repeat was free
+    expect(second).toEqual(first); // and identical, not merely cheap
+  });
+
+  it('caches the ESCALATED answer, so the expensive path is the one paid for least often', async () => {
+    // An ambiguous message costs a Haiku call plus an Opus call. That is the pair worth
+    // never buying twice.
+    responses.push({ text: '[{"helperHandle":"carol","kind":"reviewed","confidence":0.2}]' });
+    responses.push({ text: '[{"helperHandle":"carol","kind":"reviewed","confidence":0.9}]' });
+
+    const first = await detectRecognitionsSmart('maybe @carol looked at it?');
+    expect(createCalls).toHaveLength(2);
+
+    const second = await detectRecognitionsSmart('maybe @carol looked at it?');
+    expect(createCalls).toHaveLength(2);
+    expect(second).toEqual(first);
+    expect(first).toEqual([{ helperHandle: 'carol', kind: 'reviewed' }]);
+  });
+
+  it('does NOT cache a degraded fallback, so one transient failure is not permanent', async () => {
+    // The model returns something the type guard rejects, so detection degrades to the
+    // deterministic baseline. Caching that would turn a single blip into a permanently
+    // worse reading for this message text.
+    responses.push({ text: 'not json at all' });
+
+    const degraded = await detectRecognitionsSmart('thanks @alice for the help!');
+    expect(createCalls).toHaveLength(1);
+
+    responses.push({ text: '[{"helperHandle":"alice","kind":"unblocked","confidence":0.9}]' });
+    const retried = await detectRecognitionsSmart('thanks @alice for the help!');
+
+    expect(createCalls).toHaveLength(2); // it asked again rather than serving the degraded answer
+    expect(retried).toEqual([{ helperHandle: 'alice', kind: 'unblocked' }]);
+    expect(retried).not.toEqual(degraded);
+  });
+
+  it('does not serve a cached reading after the model changes', async () => {
+    // Guards the correctness half of the cache: the key covers the model ids, so swapping a
+    // tier must invalidate. Asserted through the public path rather than the key function.
+    responses.push({ text: '[{"helperHandle":"dana","kind":"paired","confidence":0.8}]' });
+    await detectRecognitionsSmart('huge thanks @dana for pairing');
+    expect(createCalls).toHaveLength(1);
+
+    resetDetectCache(); // stands in for "every key changed"
+    responses.push({ text: '[{"helperHandle":"dana","kind":"paired","confidence":0.8}]' });
+    await detectRecognitionsSmart('huge thanks @dana for pairing');
+    expect(createCalls).toHaveLength(2);
   });
 
   it('falls back to the deterministic baseline with no key and calls no model', async () => {
