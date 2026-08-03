@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "audit:ci": "node scripts/audit-gate.mts",
+    "cost:model": "node scripts/cost-model.mjs",
     "test:unit": "vitest run --project unit",
     "test:evals": "vitest run --project evals",
     "test:rules": "firebase emulators:exec --only firestore --project demo-rally \"vitest run --project rules\"",

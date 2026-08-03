@@ -1,6 +1,7 @@
 import { MODELS, extractJson, hasModel, recordOutcome } from './agent';
 import { inferViaConduit } from './conduit/rally-client';
 import { detectRecognitions, type DetectedRecognition } from './detect';
+import { detectCacheKey, getCachedDetections, setCachedDetections } from './detect-cache';
 
 /**
  * The model layer over recognition detection. When ANTHROPIC_API_KEY is present it asks Claude
@@ -84,6 +85,29 @@ export function gateDetections(parsed: RawDetection[], threshold = CONFIDENCE_TH
 export async function detectRecognitionsSmart(body: string): Promise<DetectedRecognition[]> {
   if (!hasModel()) return detectRecognitions(body);
 
+  // 0. Cache lookup, before any spend. Detection runs on every posted message and is the only
+  //    model path that scales with chat volume rather than team size, so it is the path that
+  //    decides the bill. The cheap tier runs at temperature 0 under a fixed system prompt, so
+  //    the same text yields the same reading and caching changes nothing a user sees.
+  //
+  //    The stored value is the FINAL gated result below, after the confidence gate and after
+  //    any escalation, so a hit reproduces the full path's answer rather than a partial one.
+  //    See lib/detect-cache.ts for why the key covers both model ids, the system prompt and
+  //    the threshold, and docs/COST.md for what this is worth.
+  const cacheKey = detectCacheKey({
+    body,
+    briefModel: MODELS.brief,
+    escalateModel: MODELS.escalate,
+    system: DETECT_SYSTEM,
+    threshold: CONFIDENCE_THRESHOLD,
+  });
+  const cached = getCachedDetections(cacheKey);
+  if (cached) return cached;
+
+  // A fallback to the deterministic baseline is deliberately NOT cached. Those returns mean the
+  // model was absent or the call failed, and caching a degraded answer would turn one transient
+  // 429 into a permanently wrong reading for that message text.
+
   // 1. Bulk pass on the cheap tier. Haiku accepts sampling, so determinism comes from temperature 0
   //    plus the tightly-scoped system prompt (return-only-JSON, never-infer).
   const { text: briefText } = await inferViaConduit({
@@ -121,9 +145,17 @@ export async function detectRecognitionsSmart(body: string): Promise<DetectedRec
       retryProfile: 'background', // same bulk path, same patient budget.
     });
     const escalated = extractJson(escalateText, isDetections);
-    if (escalated) return gateDetections(escalated); // trust the stronger tier's re-read
+    if (escalated) {
+      // Cache the escalated reading: it IS the final answer for this text, and it is the
+      // expensive one, having cost a cheap call plus an Opus call.
+      const gated = gateDetections(escalated);
+      setCachedDetections(cacheKey, gated);
+      return gated;
+    }
     // Escalation failed/invalid: fall through to the cheap tier's gated result below.
   }
 
-  return gateDetections(parsed);
+  const gated = gateDetections(parsed);
+  setCachedDetections(cacheKey, gated);
+  return gated;
 }

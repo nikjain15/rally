@@ -44,6 +44,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
 }));
 
 import { MODELS, callClaudeDetailed, resetUsage, usageFromError, usageTotals } from '@/lib/agent';
+import { resetDetectCache } from '@/lib/detect-cache';
 import { detectRecognitionsSmart } from '@/lib/detect-model';
 import {
   AttemptTimeoutError,
@@ -109,6 +110,10 @@ beforeEach(() => {
   script.length = 0;
   resetUsage();
   process.env.ANTHROPIC_API_KEY = 'test-key';
+  // The detection cache is process-global and would otherwise carry readings between
+  // tests, so a second test using the same message body would assert zero model calls
+  // and fail for a reason that has nothing to do with what it is testing.
+  resetDetectCache();
 });
 
 afterEach(() => {
