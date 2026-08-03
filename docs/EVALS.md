@@ -99,6 +99,64 @@ the set reflects observed phrasing frequency alongside the designed bands.
 - **Assistant faithfulness.** Judge that a proposal matches the user's intent and that the reply
   never claims to have *done* something it only drafted.
 
+### How the grading is graded, and why there is no judge to validate
+
+The standard question here is "you grade with an LLM judge, so how do you know the judge is any
+good". Rally's answer is that there is no judge on the detection path. Grading is `scoreCase` in
+`lib/eval-detect.ts`: exact, multiplicity-aware set matching on `(helperHandle, kind)`, order
+independent. No model, no prompt, no rubric. An exact check cannot drift between runs, cannot be
+argued out of a verdict, and costs nothing, so it runs on every commit rather than on a schedule
+somebody has to remember. The scorer's own behaviour is pinned by four cases in
+`tests/evals/detection.test.ts` covering the perfect prediction, the wrong helper (which must count
+as both a false positive and a false negative), the miss, and the spurious detection.
+
+Choosing exact matching over a judge is the point, not a shortcut taken for lack of one. The LLM
+judge in the roadmap items above is for *brief quality* and *assistant faithfulness*, where the
+output is prose and there is nothing exact to compare against. When that lands it will need its own
+validation against human labels, and it does not exist yet.
+
+What still needs showing is that the labels are being beaten by more than a trivial strategy would
+beat them. A score reported on its own measures the dataset as much as the detector: on a set that
+is mostly positives, firing on every `@handle` looks like good recall, and on a set that is mostly
+negatives, returning nothing looks like a flawless false-positive rate. So every number is reported
+next to the number it has to beat.
+
+**Measured 2026-08-02 on the committed 64-case set:**
+
+| | F1 | case agreement | Cohen's kappa |
+|---|---|---|---|
+| **shipped detector** | **0.861** | **0.844** | **0.684** (substantial) |
+| null: credit every `@handle` | 0.362 | 0.703 | 0.381 |
+| null: never propose anything | 0 | 0.469 | 0 |
+| best single-answer strategy | n/a | 0.531 | 0 |
+
+Per class, because one good direction is not quality: the detector catches **0.912** of the messages
+that genuinely credit someone (31/34) and correctly leaves **0.767** of the rest alone (23/30).
+
+Three things that table is built to make visible:
+
+- **The every-handle null model is genuinely tempting.** It scores 0.703 case agreement, which reads
+  as respectable, precisely because half these messages do credit somebody. Its kappa is 0.381 and
+  it fires on 5 of every 8 messages. This is the exact shape of a metric that flatters a strategy
+  carrying no signal, and it is why raw agreement is never reported alone here.
+- **The always-silent null model scores a perfect false-positive rate**, 0.000, and precision 1.0.
+  Both are the best possible values. Its kappa is 0 and its F1 is 0. A false-positive rate quoted on
+  its own would rank it above the shipped detector.
+- **The set is 53% positive**, inside the 40/60 band, so kappa is stable and an always-one-answer
+  detector cannot look competent. That balance is asserted, not assumed.
+
+The floors asserted in the suite sit below each of those measurements: kappa at 0.6 (the bottom of
+Landis and Koch's *substantial* band, the same floor Conduit and Pulse hold their judges to),
+agreement more than 0.2 above the majority baseline, catch rate 0.85, leave-alone rate 0.7, and the
+shipped detector strictly ahead of every null model on both F1 and kappa. The null models are
+committed as real functions rather than remembered figures, so they are recomputed on every run and
+cannot go stale as the labeled set grows.
+
+**What this does not establish.** These are 64 hand-written cases, so the numbers describe designed
+bands rather than observed traffic, as the provenance section above says. The kappa is agreement
+against one author's labels, not inter-rater agreement between two people, which is the stronger
+form and needs a second labeller.
+
 ## Layer 5, A/B (ROADMAP, needs external users)
 
 The pilot is a single 65-person cohort with no external users, so no A/B has run. When there is
