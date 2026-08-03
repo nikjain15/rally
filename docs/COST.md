@@ -27,20 +27,20 @@ Scenario: 30 members posting 12 messages a day, so **360 messages/day**. 8% of m
 
 | Scenario | Model calls/day | Cost/day | Over 30 days |
 |---|---|---|---|
-| Everything on `claude-opus-4-8` | 360 | $1.93 | **$57.83** |
-| Cascade, no cache | 389 | $0.28 | **$8.48** |
-| Cascade + cache | 253 | $0.18 | **$5.51** |
+| Everything on `claude-opus-4-8` | 360 | $0.64 | **$19.28** |
+| Cascade, no cache | 389 | $0.18 | **$5.40** |
+| Cascade + cache | 253 | $0.12 | **$3.51** |
 
-Per call: `claude-haiku-4-5` is **$0.00036**, `claude-opus-4-8` is **$0.00536**, a 15x gap on
+Per call: `claude-haiku-4-5` is **$0.00036**, `claude-opus-4-8` is **$0.00179**, a 5x gap on
 roughly 157 input and 40 output tokens.
 
 ## What each decision is worth, including the unflattering answer
 
-**The cascade is the whole story: it saves about $49 of every $58.** Routing bulk classification to
-the cheap tier and reserving the strong tier for genuinely ambiguous messages is a 7x reduction. That
+**The cascade is the whole story: it saves about $14 of every $19.** Routing bulk classification to
+the cheap tier and reserving the strong tier for genuinely ambiguous messages is a 3.6x reduction. That
 decision predates this document.
 
-**The cache saves about $3 more, and that is a small number.** It is worth writing down plainly
+**The cache saves about $2 more, and that is a small number.** It is worth writing down plainly
 rather than dressing up. At this volume, caching is a rounding error next to tier routing. It was
 still worth building for two reasons that are not the headline figure:
 
@@ -52,6 +52,33 @@ still worth building for two reasons that are not the headline figure:
 If the assumed 35% hit rate turns out to be 10%, the cache saves under a dollar a month and should be
 described as a correctness convenience rather than a cost control. The counters in
 `lib/detect-cache.ts` exist so that is answerable rather than arguable.
+
+## The prices in this repo were wrong, and it mattered
+
+Every Opus figure here was 3x too high until 2026-08-02, because `MODEL_PRICING` in
+`lib/agent.ts` carried `claude-opus-4-8` at $15/$75 per million tokens. The published rate
+is **$5/$25**. The old numbers were Opus-3-era pricing that nobody re-checked when the
+model id changed.
+
+This was not a documentation error. `estimateCostUsd` reads that table and feeds
+`recordUsage`, so Rally's **live cost meter** was overstating every Opus call by the same
+factor, and the escalation tier was reported as 15x the cheap tier when it is 5x.
+
+| | before the fix | corrected |
+|---|---|---|
+| Opus per call | $0.00536 | **$0.00179** |
+| Opus vs Haiku | 15x | **5x** |
+| All-Opus, 30 days | $57.83 | **$19.28** |
+| Cascade saves | $49.35 | **$13.88** |
+| Cache saves | $2.97 | **$1.89** |
+
+The conclusion survives: the cascade is still where the money is, and the cache is still a
+rounding error beside it. Every magnitude was wrong.
+
+The lesson is the one this document was already built around. A price typed into source is
+a measurement with an expiry date, and nothing here re-checked it. Because the cost model
+reads the table rather than restating it, the correction reached every figure the moment
+the table changed. That property is worth more than any single number in this file.
 
 ## What is measured, estimated, and assumed
 
