@@ -380,34 +380,66 @@ identical to an oversight.
 
 ## Kill criteria
 
-**No kill line has been set for Rally. Not one. This is stated plainly rather than filled in with a
-plausible-looking number, because inventing a threshold Nik never committed to would be exactly the
-kind of false precision the rest of this audit removes.**
+**Set 2026-08-02.** This section previously said no kill line had been set, and gave the reason one
+could not simply be written: "Rally cannot fail this test, because it cannot take it. Nothing in the
+app records the suggested-to-confirmed transition or the time to confirm. The instrumentation is a
+prerequisite for the criterion, not a follow-up to it."
 
-What a real kill criterion would have to be, so the gap is specific rather than vague:
+Both things have now happened, in that order.
 
-1. **A single number, pre-committed in writing, before the data is looked at.** Choosing a threshold
-   after seeing the result is not a kill criterion, it is a rationalisation.
-2. **Tied to the recognition funnel**, because that is where the product's whole thesis lives. Rally's
-   claim is that peer-confirmed recognition is worth building a chat app around. The funnel is:
-   messages posted, suggestions generated, suggestions confirmed, and confirmed recognitions per
-   active member per week (the north star named in `docs/PRD.md` line 81). The kill line belongs on
-   the confirm step, because that is the step that tests whether people actually want this, as opposed
-   to whether the detector works.
-3. **With a stated window and a stated N**, so the result is interpretable. A conversion rate measured
-   over one week in a 65-person cohort has an interval wide enough to contain almost any hypothesis,
-   which is the same statistical-power problem finding E-P0-2 raises about the eval set. Whatever
-   number gets picked has to come with the sample size that makes it mean something.
-4. **Honestly checked, including when the answer is unwelcome**, and written down either way. A kill
-   criterion that is only consulted when things are going well is not one.
-5. **Distinguishing "the loop does not work" from "the loop was never instrumented".** Right now
-   Rally cannot fail this test, because it cannot take it: per assumption AS-2 and finding D-P1-8,
-   nothing in the app records the suggested-to-confirmed transition or the time to confirm. The
-   instrumentation is a prerequisite for the criterion, not a follow-up to it.
+### First, the instrumentation
 
-**Status: open decision, owned by Nik, unresolved.** Two things have to happen in order, and neither
-has: instrument the recognition funnel so the number exists, then pre-commit a threshold on it before
-reading the first result. Until both are done, Rally has no kill criteria and should not claim to.
+`confirmRecognition` flipped `status` to `confirmed` in place and wrote **no timestamp**. That single
+omission was the whole blocker. You could count how many recognitions are confirmed right now; you
+could not ask what share of last month's suggestions were ever confirmed, or how long people took.
+
+`confirmedAt` is now written in the same transaction as the status flip and the ledger entry
+(`lib/recognition-admin.ts`). Clients cannot write it: `firestore.rules` denies all client writes to
+`recognitions`, and confirm is server-only precisely so status and points move atomically.
+
+### Then, the line
+
+**Kill or pivot if fewer than 30% of suggestions created in a 4-week window are ever confirmed, over
+at least 100 suggestions.**
+
+**Consequence: the recognition loop is not the product.** Stop building on the confirm step and
+either drop the economy to a plain feed, or pivot to whatever people did use. Explicitly not "tune
+the detector": detector quality is measured separately in `tests/evals/detection.test.ts` and is not
+what this line tests.
+
+Evaluated by `evaluateKillLine` in [`lib/kill-criteria.ts`](../lib/kill-criteria.ts), covered by
+`tests/unit/kill-criteria.test.ts`.
+
+Each number answers one of the requirements this section already listed:
+
+- **On the confirm step**, because that is the step that tests whether people actually want this, as
+  opposed to whether the detector works.
+- **Four weeks and at least 100 suggestions**, because a rate over one week in a 65-person cohort has
+  an interval wide enough to contain almost any hypothesis. The sample floor is enforced: the tests
+  pin that 20 suggestions with zero confirms returns `not_enough_data`, not a kill.
+- **A cohort, not a snapshot.** "Confirmed over total, right now" is the tempting measurement and the
+  wrong one: it is dragged down by suggestions made yesterday that nobody has had time to confirm,
+  and it moves with posting volume even when behaviour does not, so a busier product would look like
+  a failing one. The rate here is defined over suggestions CREATED in the window, and a suggestion
+  confirmed after the window closed still counts. A test pins the difference: 150 settled
+  suggestions at 60% plus a fresh burst of 100 reads 36% as a snapshot, which is barely above the
+  line, and converges back to 60% as the fresh ones settle.
+
+### Why not the north star
+
+`docs/PRD.md` line 81 names confirmed recognitions per active member per week. That is the better
+product metric and the worse kill line, because it moves with posting volume as well as with confirm
+behaviour, so a quiet month and a broken loop look alike. The confirm rate isolates the behaviour.
+
+### Result so far: not enough data
+
+No 4-week cohort has been evaluated, and `confirmedAt` only starts being written from this commit, so
+the first readable cohort is four weeks out. `evaluateKillLine` returns `not_enough_data` rather than
+a reassuring "holding".
+
+That is a real limitation and worth stating plainly: recognitions confirmed **before** this commit
+have no `confirmedAt` and will read as unconfirmed. Any cohort spanning the change is biased
+downwards, so the first honest evaluation is of a window starting after this commit, not before.
 
 ---
 
