@@ -161,7 +161,17 @@ export async function confirmRecognition(
 
     const points: number = capped ? 0 : (rec.points ?? pointsFor(rec.kind));
 
-    tx.update(recRef, { status: 'confirmed', capped });
+    // `confirmedAt` is the funnel instrumentation, and it is the whole reason Rally
+    // can have a kill criterion at all. Until 2026-08-02 confirm flipped `status` in
+    // place with no timestamp, so the suggested-to-confirmed transition left no trace
+    // in time: you could count how many recognitions are confirmed RIGHT NOW, and you
+    // could not ask what share of last month's suggestions ever got confirmed, or how
+    // long people took. A snapshot ratio cannot answer either, because it mixes
+    // suggestions from every week together and drifts as volume changes.
+    //
+    // One server timestamp turns that into a cohort measurement. See
+    // `lib/kill-criteria.ts` and docs/DECISION_LOG.md §Kill criteria.
+    tx.update(recRef, { status: 'confirmed', capped, confirmedAt: FieldValue.serverTimestamp() });
 
     // Ledger entries — deterministic ids keyed to the recognition so even a rules-bypassing
     // re-run can't create a second award for the same recognition.
