@@ -55,8 +55,15 @@ export function supportsSampling(model: string): boolean {
  */
 export const MODEL_PRICING: Record<string, { inputPerMTok: number; outputPerMTok: number }> = {
   'claude-haiku-4-5': { inputPerMTok: 1, outputPerMTok: 5 },
+  // List price. Sonnet 5 carries an introductory $2/$10 through 2026-08-31; the
+  // higher standing rate is used here so the meter never under-reports.
   'claude-sonnet-5': { inputPerMTok: 3, outputPerMTok: 15 },
-  'claude-opus-4-8': { inputPerMTok: 15, outputPerMTok: 75 },
+  // Corrected 2026-08-02, was 15/75. That was Opus-3-era pricing and it made
+  // every Opus figure in this repo 3x too high: the escalation tier looked 15x
+  // the cost of Haiku when it is 5x, and the live meter overstated Opus spend
+  // by the same factor. estimateCostUsd feeds recordUsage, so this was not a
+  // documentation error, it was wrong telemetry.
+  'claude-opus-4-8': { inputPerMTok: 5, outputPerMTok: 25 },
 };
 
 export type Usage = { inputTokens: number; outputTokens: number };
